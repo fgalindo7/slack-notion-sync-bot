@@ -11,7 +11,7 @@
 
 ---
 
-## 🧭 Overview
+## Overview
 
 **On-Call Bot** streamlines the process of handling on-call incidents in Slack by automatically parsing specially formatted messages (using the `@auto` syntax), validating key fields, and syncing updates directly into Notion.
 
@@ -19,18 +19,18 @@ No more manual copy-pasting — just type `@auto` in Slack and let the bot take 
 
 ---
 
-## 🧩 Features
+## Features
 
-- 🧵 **Smart message parsing:** Extracts structured data like priority, issue, customer, replication steps, etc.
-- 🪄 **Notion integration:** Automatically creates or updates corresponding pages in your Notion database.
-- 🧠 **Thread awareness:** Responds only to top-level messages (or optionally to threads).
-- 🐞 **Validation feedback:** Instantly replies if required fields are missing.
-- 🕵️ **Schema detection:** Dynamically matches your Notion DB schema without hardcoding.
-- ⚙️ **Socket Mode ready:** Runs seamlessly via Slack Socket Mode for instant responsiveness.
+- **Smart message parsing:** Extracts structured data like priority, issue, customer, replication steps, etc.
+- **Notion integration:** Automatically creates or updates corresponding pages in your Notion database.
+- **Thread awareness:** Responds only to top-level messages (or optionally to threads).
+- **Validation feedback:** Instantly replies if required fields are missing.
+- **Schema detection:** Dynamically matches your Notion DB schema without hardcoding.
+- **Socket Mode ready:** Runs seamlessly via Slack Socket Mode for instant responsiveness.
 
 ---
 
-## 🧱 Architecture
+## Architecture
 
 Slack → @auto message → Bolt App → Notion API → Notion Page
 
@@ -41,7 +41,7 @@ Slack → @auto message → Bolt App → Notion API → Notion Page
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 ### Required Environment Variables
 
@@ -63,27 +63,33 @@ Store these in `.env` or a secret manager (Doppler, Vault, etc).
 
 ### Step 1: Install dependencies
 
+```sh
 npm install
+```
 
 ### Step 2: Create `.env`
 
+```sh
 SLACK_BOT_TOKEN=xoxb-...
 SLACK_APP_LEVEL_TOKEN=xapp-...
 NOTION_TOKEN=secret_...
 NOTION_DATABASE_ID=abc123def456
 WATCH_CHANNEL_ID=C123456789
 ALLOW_THREADS=false
+```
 
 ### Step 3: Start the app
 
+```sh
 npm start
+```
 
 ✅ You should see:
 ⚡️ On-call auto ingestor running (Socket Mode)
 
 ---
 
-## 🧪 Example Slack Message
+## Example Slack Message
 
 @auto  
 Priority: P1  
@@ -96,7 +102,7 @@ Relevant Links: https://status.acme.io, https://notion.so/acme-api
 
 ---
 
-## 🧠 How It Works
+## How It Works
 
 | Component | Responsibility |
 |------------|----------------|
@@ -108,7 +114,7 @@ Relevant Links: https://status.acme.io, https://notion.so/acme-api
 
 ---
 
-## 🧰 Tech Stack
+## Tech Stack
 
 - Slack Bolt JS  
 - Notion SDK  
@@ -117,13 +123,19 @@ Relevant Links: https://status.acme.io, https://notion.so/acme-api
 
 ---
 
-## 🧑‍💻 Development
+## Development
 
 Run with hot reload:
+
+```sh
 npm run dev
+```
 
 Run linter:
+
+```sh
 npm run lint
+```
 
 ---
 
@@ -131,14 +143,16 @@ npm run lint
 
 You can deploy easily using Docker:
 
+```sh
 docker build -t on-call-bot .  
 docker run -d --env-file .env on-call-bot
+```
 
 Or via Cloud Run / Fly.io / Railway.app.
 
 ---
 
-## 🧩 Folder Structure
+## Folder Structure
 
 on-call-bot/  
 ├── app.js  
@@ -149,7 +163,7 @@ on-call-bot/
 
 ---
 
-## ❤️ Contributing
+## 🤝 Contributing
 
 1. Fork  
 2. Create a branch (git checkout -b feature/awesome)  
@@ -158,7 +172,7 @@ on-call-bot/
 
 ---
 
-## 🛡️ License
+## License
 
 MIT © 2025 — Francisco
 

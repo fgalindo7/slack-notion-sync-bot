@@ -1,0 +1,15 @@
+version: "3.9"
+services:
+  oncall-auto:
+    ports: []
+    build: .
+    container_name: oncall-auto
+    restart: unless-stopped
+    env_file: .env
+    # No ports needed for Socket Mode; Slack connects out to Slack, and Slack to you via websockets.
+    # If you want health monitoring, add a sidecar or use `docker inspect`/logs.
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"process.exit(0)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3

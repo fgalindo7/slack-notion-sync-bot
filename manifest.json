@@ -1,0 +1,35 @@
+{
+  "display_information": {
+    "name": "On-call Auto Ingestor",
+    "description": "Listens for @auto messages in on-call channels and logs them to Notion.",
+    "background_color": "#3F0E40"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "On-call Bot",
+      "always_online": true
+    }
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "channels:history",
+        "channels:read",
+        "chat:write"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "bot_events": [
+        "message.channels"
+      ]
+    },
+    "socket_mode_enabled": true,
+    "interactivity": {
+      "is_enabled": false
+    },
+    "org_deploy_enabled": false,
+    "token_rotation_enabled": false
+  }
+}

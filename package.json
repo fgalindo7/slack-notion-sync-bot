@@ -1,0 +1,13 @@
+{
+  "name": "oncall-auto-ingestor",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "dependencies": {
+    "@notionhq/client": "^2.2.15",
+    "@slack/bolt": "^3.18.0"
+  }
+}

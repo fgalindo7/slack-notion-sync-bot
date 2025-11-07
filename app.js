@@ -1,3 +1,9 @@
+/**
+ * @fileoverview Slack-Notion Sync Bot - Automatically tracks on-call issues from Slack to Notion
+ * Listens for messages with specific triggers (@auto, @cat, @peepo) and creates/updates Notion pages
+ * @author Francisco Galindo
+ */
+
 // app.js
 import bolt from '@slack/bolt';              // Bolt is CJS; use default import
 const { App, LogLevel } = bolt;
@@ -31,7 +37,11 @@ const app = new App({
 
 const notion = new Notion({ auth: NOTION_TOKEN });
 
-// --- Global resilience: swallow transient Socket Mode disconnects ---
+/**
+ * Checks if an error is a transient Socket Mode disconnect that can be safely ignored
+ * @param {Error} err - The error to check
+ * @returns {boolean} True if the error is an explicit socket disconnect, false otherwise
+ */
 function isExplicitSocketDisconnect(err) {
   const msg = String(err && err.message || '');
   return msg.includes("Unhandled event 'server explicit disconnect'") || msg.includes('server explicit disconnect');
@@ -53,7 +63,15 @@ process.on('unhandledRejection', (reason) => {
   console.error('[fatal] Unhandled rejection:', reason);
 });
 
-// --- Needed-by parser (US-friendly) ---
+/**
+ * Parses a "needed by" date/time string supporting multiple formats
+ * Supports ISO dates, MM/DD/YYYY with optional time, and YYYY-MM-DD formats
+ * @param {string} input - The date string to parse (e.g., "11/04/2025 7PM", "2025-11-04", "11/04/2025")
+ * @returns {Date|null} Parsed Date object or null if parsing fails
+ * @example
+ * parseNeededByString("11/04/2025 7PM") // Returns Date at 7PM on Nov 4, 2025
+ * parseNeededByString("2025-11-04") // Returns Date at 5PM (default) on Nov 4, 2025
+ */
 function parseNeededByString(input) {
   if (!input) return null;
   const s = String(input).trim();
@@ -107,13 +125,25 @@ function parseNeededByString(input) {
   return null; // let caller decide a default
 }
 
-// --- Simple email validator ---
+/**
+ * Validates if a string is a properly formatted email address
+ * @param {string} s - The string to validate
+ * @returns {boolean} True if the string is a valid email format, false otherwise
+ */
 function isEmail(s) {
   if (!s || typeof s !== 'string') return false;
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
 }
 
-// --- Normalize Slack mailto/email tokens to plain email ---
+/**
+ * Normalizes Slack email formats to plain email addresses
+ * Handles Slack's mailto links and angle-bracket wrapping
+ * @param {string} s - The potentially Slack-formatted email string
+ * @returns {string} Plain email address without Slack formatting
+ * @example
+ * normalizeEmail("<mailto:user@example.com|user@example.com>") // Returns "user@example.com"
+ * normalizeEmail("<user@example.com>") // Returns "user@example.com"
+ */
 function normalizeEmail(s) {
   if (!s) return '';
   let t = String(s).trim();
@@ -128,7 +158,22 @@ function normalizeEmail(s) {
   return t;
 }
 
-/* ----------------- Parsing + validation ----------------- */
+/**
+ * Parses a message block for on-call issue tracking fields
+ * Extracts Priority, Issue, How to replicate, Customer, 1Password, Needed by, and Relevant Links
+ * @param {string} text - The message text to parse (with @auto/@cat/@peepo trigger)
+ * @returns {Object} Parsed fields object
+ * @returns {string} returns.priority - Issue priority (P0/P1/P2)
+ * @returns {string} returns.issue - Description of the issue
+ * @returns {string} returns.replicate - Steps to replicate the issue
+ * @returns {string} returns.customer - Customer name or identifier
+ * @returns {string} returns.onepass - 1Password email for access
+ * @returns {Date} returns.needed - Parsed needed-by date (with default if not provided)
+ * @returns {string} returns.neededRaw - Raw needed-by input string
+ * @returns {boolean} returns.neededValid - Whether the needed-by date was successfully parsed
+ * @returns {string[]} returns.urls - Array of extracted URLs from relevant links
+ * @returns {string} returns.linksText - Full text content of relevant links field
+ */
 function parseAutoBlock(text = '') {
   const cleaned = text.replace(/^\s*@(auto|cat|peepo)\s*\n?/i, '');
   const pick = (label) => {
@@ -174,17 +219,39 @@ function parseAutoBlock(text = '') {
   return { priority, issue, replicate, customer, onepass, needed, neededRaw, neededValid, urls, linksText: links };
 }
 
+/**
+ * Checks if a Slack event is a top-level message (not a thread reply)
+ * @param {Object} evt - Slack event object
+ * @returns {boolean} True if the message is top-level, false if it's in a thread
+ */
 const isTopLevel = (evt) => !(evt?.thread_ts && evt.thread_ts !== evt.ts);
+
+/**
+ * Extracts the trigger keyword from message text
+ * @param {string} text - Message text to check
+ * @returns {string|null} The trigger word ('auto', 'cat', or 'peepo') or null if no trigger found
+ */
 const getTrigger = (text) => {
   const m = /^\s*@(auto|cat|peepo)\b/i.exec(text || '');
   return m ? m[1].toLowerCase() : null;
 };
+
+/**
+ * Returns an emoji suffix based on the trigger keyword used
+ * @param {string} t - The trigger keyword ('auto', 'cat', or 'peepo')
+ * @returns {string} Emoji suffix string for the response message
+ */
 const suffixForTrigger = (t) => {
   if (t === 'cat') return ' 🐈';
   if (t === 'peepo') return ' :peepo-yessir:';
   return '';
 };
 
+/**
+ * Identifies which required fields are missing from a parsed message
+ * @param {Object} parsed - Parsed message object from parseAutoBlock()
+ * @returns {string[]} Array of missing field names
+ */
 function missingFields(parsed) {
   const missing = [];
   if (!parsed.priority) missing.push('Priority (P0/P1/P2)');
@@ -196,6 +263,12 @@ function missingFields(parsed) {
   return missing;
 }
 
+/**
+ * Validates field types and formats in a parsed message
+ * Checks 1Password email format and needed-by date parsing
+ * @param {Object} parsed - Parsed message object from parseAutoBlock()
+ * @returns {string[]} Array of validation error messages
+ */
 function typeIssues(parsed) {
   const issues = [];
   // Inline email check (avoids dependency on global isEmail)
@@ -217,8 +290,19 @@ function typeIssues(parsed) {
   return issues;
 }
 
-/* ----------------- Notion helpers ----------------- */
-// Create or update a page; always write Slack TS (if present) and permalink
+/**
+ * Creates a new Notion page or updates an existing one with issue tracking data
+ * Always writes Slack message timestamp and permalink for future lookups
+ * @param {Object} params - Function parameters
+ * @param {Object} params.parsed - Parsed issue data from parseAutoBlock()
+ * @param {string} params.permalink - Slack message permalink URL
+ * @param {string} params.slackTs - Slack message timestamp (unique identifier)
+ * @param {string} params.reporterMention - Slack user mention string
+ * @param {string|null} params.reporterNotionId - Notion user ID for reporter (if resolved)
+ * @param {string} [params.pageId] - Existing Notion page ID to update (creates new if omitted)
+ * @returns {Promise<Object>} Object with id and url of the created/updated Notion page
+ * @throws {Error} Throws if Notion API call fails (including permission errors)
+ */
 async function createOrUpdateNotionPage({ parsed, permalink, slackTs, reporterMention, reporterNotionId, pageId }) {
   if (!SCHEMA) await loadSchema();
 
@@ -298,7 +382,14 @@ async function createOrUpdateNotionPage({ parsed, permalink, slackTs, reporterMe
   }
 }
 
-// Find a page preferentially by Slack TS; if not found, fall back to permalink
+/**
+ * Finds an existing Notion page for a Slack message
+ * Searches first by Slack timestamp (preferred), then by permalink as fallback
+ * @param {Object} params - Function parameters
+ * @param {string} params.slackTs - Slack message timestamp
+ * @param {string} params.permalink - Slack message permalink URL
+ * @returns {Promise<Object|null>} Notion page object if found, null otherwise
+ */
 async function findPageForMessage({ slackTs, permalink }) {
   if (!SCHEMA) await loadSchema();
 
@@ -327,7 +418,16 @@ async function findPageForMessage({ slackTs, permalink }) {
   return null;
 }
 
-/* ----------------- Slack responses ----------------- */
+/**
+ * Posts a Slack message indicating missing required fields
+ * @param {Object} params - Function parameters
+ * @param {Object} params.client - Slack Web API client
+ * @param {string} params.channel - Slack channel ID
+ * @param {string} params.ts - Message timestamp (for threading)
+ * @param {string[]} params.fields - Array of missing field names
+ * @param {string} [params.suffix=''] - Optional emoji suffix to append
+ * @returns {Promise<void>}
+ */
 async function replyMissing({ client, channel, ts, fields, suffix = '' }) {
   const lines = fields.map(f => `• ${f}`).join('\n');
   const text =
@@ -337,6 +437,16 @@ async function replyMissing({ client, channel, ts, fields, suffix = '' }) {
   await client.chat.postMessage({ channel, thread_ts: ts, text: text + suffix });
 }
 
+/**
+ * Posts a Slack message indicating field format/validation errors
+ * @param {Object} params - Function parameters
+ * @param {Object} params.client - Slack Web API client
+ * @param {string} params.channel - Slack channel ID
+ * @param {string} params.ts - Message timestamp (for threading)
+ * @param {string[]} params.issues - Array of validation error messages
+ * @param {string} [params.suffix=''] - Optional emoji suffix to append
+ * @returns {Promise<void>}
+ */
 async function replyInvalid({ client, channel, ts, issues, suffix = '' }) {
   const lines = issues.map(f => `• ${f}`).join('\n');
   const text =
@@ -345,6 +455,17 @@ async function replyInvalid({ client, channel, ts, issues, suffix = '' }) {
   await client.chat.postMessage({ channel, thread_ts: ts, text: text + suffix });
 }
 
+/**
+ * Posts a success message when a Notion page is created
+ * @param {Object} params - Function parameters
+ * @param {Object} params.client - Slack Web API client
+ * @param {string} params.channel - Slack channel ID
+ * @param {string} params.ts - Message timestamp (for threading)
+ * @param {string} params.pageUrl - URL of the created Notion page
+ * @param {Object} params.parsed - Parsed message data (for issue title)
+ * @param {string} [params.suffix=''] - Optional emoji suffix to append
+ * @returns {Promise<void>}
+ */
 async function replyCreated({ client, channel, ts, pageUrl, parsed, suffix = '' }) {
   const dbPart = SCHEMA?.dbUrl ? `<${SCHEMA.dbUrl}|${SCHEMA.dbTitle || 'On-call Issue Tracker DB'}>` : 'Notion DB';
   const pagePart = `<${pageUrl}|${parsed?.issue || 'Notion Page'}>`;
@@ -352,6 +473,17 @@ async function replyCreated({ client, channel, ts, pageUrl, parsed, suffix = '' 
   await client.chat.postMessage({ channel, thread_ts: ts, text });
 }
 
+/**
+ * Posts a success message when a Notion page is updated
+ * @param {Object} params - Function parameters
+ * @param {Object} params.client - Slack Web API client
+ * @param {string} params.channel - Slack channel ID
+ * @param {string} params.ts - Message timestamp (for threading)
+ * @param {string} params.pageUrl - URL of the updated Notion page
+ * @param {Object} params.parsed - Parsed message data (for issue title)
+ * @param {string} [params.suffix=''] - Optional emoji suffix to append
+ * @returns {Promise<void>}
+ */
 async function replyUpdated({ client, channel, ts, pageUrl, parsed, suffix = '' }) {
   const dbPart = SCHEMA?.dbUrl ? `<${SCHEMA.dbUrl}|${SCHEMA.dbTitle || 'On-call Issue Tracker DB'}>` : 'Notion DB';
   const pagePart = `<${pageUrl}|${parsed?.issue || 'Notion Page'}>`;
@@ -368,12 +500,25 @@ app.error(async (error) => {
   console.error('[error] Bolt app error:', error);
 });
 
-// --- Notion permission error helpers ---
+/**
+ * Checks if an error is a Notion permission/access error
+ * @param {Error} err - The error to check
+ * @returns {boolean} True if the error indicates insufficient Notion permissions
+ */
 function isNotionPermError(err) {
   // Notion returns APIResponseError with code 'restricted_resource' and 403
   return !!err && (err.code === 'restricted_resource' || err.status === 403);
 }
 
+/**
+ * Posts a Slack message with instructions to fix Notion permission issues
+ * @param {Object} params - Function parameters
+ * @param {Object} params.client - Slack Web API client
+ * @param {string} params.channel - Slack channel ID
+ * @param {string} params.ts - Message timestamp (for threading)
+ * @param {string} [params.suffix=''] - Optional emoji suffix to append
+ * @returns {Promise<void>}
+ */
 async function notifyNotionPerms({ client, channel, ts, suffix = '' }) {
   const dbPart = SCHEMA?.dbUrl ? `<${SCHEMA.dbUrl}|${SCHEMA.dbTitle || 'On-call Issue Tracker DB'}>` : 'the Notion database';
   const text =
@@ -386,8 +531,14 @@ async function notifyNotionPerms({ client, channel, ts, suffix = '' }) {
   } catch (_) { /* ignore secondary errors */ }
 }
 
-/* ----------------- Event handlers ----------------- */
-// New top-level messages
+/**
+ * Handles new Slack messages and message edits
+ * Processes messages with trigger words (@auto/@cat/@peepo) and creates/updates Notion pages
+ * @param {Object} params - Event parameters from Slack Bolt
+ * @param {Object} params.event - Slack message event
+ * @param {Object} params.client - Slack Web API client
+ * @returns {Promise<void>}
+ */
 app.event('message', async ({ event, client }) => {
   try {
     // Ignore non-user-generated subtypes except edits (handled below)
@@ -453,7 +604,14 @@ app.event('message', async ({ event, client }) => {
   }
 });
 
-// Edits to original message
+/**
+ * Handles edits to previously posted messages
+ * Updates the corresponding Notion page when a tracked message is edited
+ * @param {Object} params - Function parameters
+ * @param {Object} params.event - Slack message_changed event
+ * @param {Object} params.client - Slack Web API client
+ * @returns {Promise<void>}
+ */
 async function handleEdit({ event, client }) {
   // Slack edit payload:
   // event.message.text = new text
@@ -515,9 +673,18 @@ async function handleEdit({ event, client }) {
   }
 }
 
-// --- Notion schema discovery ---
+/** 
+ * Cached Notion database schema information
+ * @type {Object|null}
+ */
 let SCHEMA = null;
 
+/**
+ * Loads and caches the Notion database schema
+ * Discovers property types and identifies Slack message tracking columns
+ * @returns {Promise<Object>} Schema object with property mappings and database metadata
+ * @throws {Error} If required tracking columns (Slack Message URL or Slack Message TS) are not found
+ */
 async function loadSchema() {
   const db = await notion.databases.retrieve({ database_id: NOTION_DATABASE_ID });
   const byName = {};
@@ -557,7 +724,12 @@ async function loadSchema() {
   return SCHEMA;
 }
 
-// --- Slack -> Notion person resolver ---
+/**
+ * Finds a Notion user ID by email address
+ * Iterates through all Notion workspace users to find a matching email
+ * @param {string} email - Email address to search for
+ * @returns {Promise<string|null>} Notion user ID if found, null otherwise
+ */
 async function findNotionUserIdByEmail(email) {
   if (!email) return null;
   let cursor;
@@ -574,6 +746,15 @@ async function findNotionUserIdByEmail(email) {
   return null;
 }
 
+/**
+ * Resolves a Slack user to a Notion user ID and mention string
+ * Looks up the Slack user's email and finds the corresponding Notion user
+ * @param {string} slackUserId - Slack user ID
+ * @param {Object} client - Slack Web API client
+ * @returns {Promise<Object>} Object with mention string and notionId
+ * @returns {string} returns.mention - Slack mention format (<@USER_ID>)
+ * @returns {string|null} returns.notionId - Notion user ID if resolved, null otherwise
+ */
 async function resolveNotionPersonForSlackUser(slackUserId, client) {
   try {
     if (!slackUserId) return { mention: '', notionId: null };
@@ -589,7 +770,14 @@ async function resolveNotionPersonForSlackUser(slackUserId, client) {
   }
 }
 
-// Helper to set a property respecting its actual type
+/**
+ * Sets a Notion property value respecting its type from the database schema
+ * Automatically converts values to the appropriate format for each property type
+ * @param {Object} props - Properties object to modify
+ * @param {string} name - Property name
+ * @param {*} value - Value to set (will be converted based on property type)
+ * @returns {void}
+ */
 function setProp(props, name, value) {
   if (value === undefined || value === null) return;
   const meta = SCHEMA?.byName[name.toLowerCase()];

@@ -87,12 +87,22 @@ const TRIGGERS = {
   PEEPO: 'peepo'
 };
 
-// Default values
+// Default values (configurable via environment variables)
 const DEFAULTS = {
-  NEEDED_BY_DAYS: 30,
-  NEEDED_BY_HOUR: 17, // 5PM
-  DB_TITLE: 'On-call Issue Tracker DB'
+  NEEDED_BY_DAYS: parseInt(process.env.DEFAULT_NEEDED_BY_DAYS || '30', 10),
+  NEEDED_BY_HOUR: parseInt(process.env.DEFAULT_NEEDED_BY_HOUR || '17', 10), // 5PM
+  DB_TITLE: process.env.DEFAULT_DB_TITLE || 'On-call Issue Tracker DB'
 };
+
+// Validate default values
+if (DEFAULTS.NEEDED_BY_DAYS < 1 || DEFAULTS.NEEDED_BY_DAYS > 365) {
+  logger.warn({ value: DEFAULTS.NEEDED_BY_DAYS }, 'DEFAULT_NEEDED_BY_DAYS out of range (1-365), using 30');
+  DEFAULTS.NEEDED_BY_DAYS = 30;
+}
+if (DEFAULTS.NEEDED_BY_HOUR < 0 || DEFAULTS.NEEDED_BY_HOUR > 23) {
+  logger.warn({ value: DEFAULTS.NEEDED_BY_HOUR }, 'DEFAULT_NEEDED_BY_HOUR out of range (0-23), using 17');
+  DEFAULTS.NEEDED_BY_HOUR = 17;
+}
 
 if (!SLACK_BOT_TOKEN || !SLACK_APP_LEVEL_TOKEN || !NOTION_TOKEN || !NOTION_DATABASE_ID) {
   logger.error({ 
@@ -407,15 +417,17 @@ function typeIssues(parsed) {
   }
   // Warn if user provided Needed by but it was unparsable
   if (parsed.neededRaw && !parsed.neededValid) {
+    const defaultHour = DEFAULTS.NEEDED_BY_HOUR;
+    const defaultTime = defaultHour === 0 ? '12AM' : defaultHour < 12 ? `${defaultHour}AM` : defaultHour === 12 ? '12PM' : `${defaultHour - 12}PM`;
     issues.push(
       `Needed by date/time format not recognized: "${parsed.neededRaw}"\n\n` +
       `*Accepted formats:*\n` +
-      `• \`MM/DD/YYYY\` → 11/04/2025 (defaults to 5PM)\n` +
+      `• \`MM/DD/YYYY\` → 11/04/2025 (defaults to ${defaultTime})\n` +
       `• \`MM/DD/YYYY HH:MM AM/PM\` → 11/04/2025 7:30 PM\n` +
       `• \`MM/DD/YYYY HPM\` → 11/04/2025 7PM\n` +
-      `• \`YYYY-MM-DD\` → 2025-11-04 (defaults to 5PM)\n` +
+      `• \`YYYY-MM-DD\` → 2025-11-04 (defaults to ${defaultTime})\n` +
       `• \`YYYY-MM-DD HH:MM\` → 2025-11-04 19:00\n\n` +
-      `If omitted entirely, defaults to 30 days from today at 5PM.`
+      `If omitted entirely, defaults to ${DEFAULTS.NEEDED_BY_DAYS} days from today at ${defaultTime}.`
     );
   }
   return issues;
@@ -1138,6 +1150,14 @@ const healthServer = http.createServer((req, res) => {
 
 // Startup
 (async () => {
+  // Log configuration at startup
+  logger.info({ 
+    defaults: DEFAULTS,
+    rateLimit: '3 requests/second',
+    timeout: '10 seconds',
+    schemaCacheTTL: '1 hour'
+  }, 'Configuration loaded');
+  
   try { 
     await loadSchema();
     logger.info({ databaseId: NOTION_DATABASE_ID }, 'Notion schema loaded successfully');

@@ -9,6 +9,7 @@ import bolt from '@slack/bolt';              // Bolt is CJS; use default import
 const { App, LogLevel } = bolt;
 import { Client as Notion } from '@notionhq/client';
 import pino from 'pino';
+import pThrottle from 'p-throttle';
 
 // Initialize structured logger
 const logger = pino({
@@ -17,6 +18,13 @@ const logger = pino({
     target: 'pino-pretty',
     options: { colorize: true }
   } : undefined
+});
+
+// Rate limiter for Notion API (3 requests per second as per Notion limits)
+const throttle = pThrottle({
+  limit: 3,
+  interval: 1000, // 1 second
+  strict: true
 });
 
 const {
@@ -51,6 +59,36 @@ const app = new App({
 
 
 const notion = new Notion({ auth: NOTION_TOKEN });
+
+// Throttled Notion API methods to respect rate limits
+const notionThrottled = {
+  databases: {
+    retrieve: throttle(async (params) => {
+      logger.debug({ databaseId: params.database_id }, 'Notion API: databases.retrieve');
+      return await notion.databases.retrieve(params);
+    }),
+    query: throttle(async (params) => {
+      logger.debug({ databaseId: params.database_id }, 'Notion API: databases.query');
+      return await notion.databases.query(params);
+    })
+  },
+  pages: {
+    create: throttle(async (params) => {
+      logger.debug({ databaseId: params.parent?.database_id }, 'Notion API: pages.create');
+      return await notion.pages.create(params);
+    }),
+    update: throttle(async (params) => {
+      logger.debug({ pageId: params.page_id }, 'Notion API: pages.update');
+      return await notion.pages.update(params);
+    })
+  },
+  users: {
+    list: throttle(async (params) => {
+      logger.debug('Notion API: users.list');
+      return await notion.users.list(params);
+    })
+  }
+};
 
 /**
  * Checks if an error is a transient Socket Mode disconnect that can be safely ignored
@@ -385,10 +423,10 @@ async function createOrUpdateNotionPage({ parsed, permalink, slackTs, reporterMe
 
   try {
     if (pageId) {
-      const upd = await notion.pages.update({ page_id: pageId, properties: props });
+      const upd = await notionThrottled.pages.update({ page_id: pageId, properties: props });
       return { id: upd.id, url: upd.url };
     } else {
-      const created = await notion.pages.create({ parent: { database_id: NOTION_DATABASE_ID }, properties: props });
+      const created = await notionThrottled.pages.create({ parent: { database_id: NOTION_DATABASE_ID }, properties: props });
       return { id: created.id, url: created.url };
     }
   } catch (err) {
@@ -417,7 +455,7 @@ async function findPageForMessage({ slackTs, permalink }) {
     } else {
       tsFilter = { property: SCHEMA.slackTsProp.name, rich_text: { equals: String(slackTs) } };
     }
-    const byTs = await notion.databases.query({ database_id: NOTION_DATABASE_ID, filter: tsFilter, page_size: 1 });
+    const byTs = await notionThrottled.databases.query({ database_id: NOTION_DATABASE_ID, filter: tsFilter, page_size: 1 });
     if (byTs.results?.[0]) return byTs.results[0];
   }
 
@@ -426,7 +464,7 @@ async function findPageForMessage({ slackTs, permalink }) {
     const urlFilter = SCHEMA.slackUrlProp.type === 'url'
       ? { property: SCHEMA.slackUrlProp.name, url: { equals: permalink } }
       : { property: SCHEMA.slackUrlProp.name, rich_text: { contains: permalink } };
-    const byUrl = await notion.databases.query({ database_id: NOTION_DATABASE_ID, filter: urlFilter, page_size: 1 });
+    const byUrl = await notionThrottled.databases.query({ database_id: NOTION_DATABASE_ID, filter: urlFilter, page_size: 1 });
     if (byUrl.results?.[0]) return byUrl.results[0];
   }
 
@@ -706,7 +744,7 @@ let SCHEMA = null;
  * @throws {Error} If required tracking columns (Slack Message URL or Slack Message TS) are not found
  */
 async function loadSchema() {
-  const db = await notion.databases.retrieve({ database_id: NOTION_DATABASE_ID });
+  const db = await notionThrottled.databases.retrieve({ database_id: NOTION_DATABASE_ID });
   const byName = {};
   for (const [name, def] of Object.entries(db.properties || {})) {
     byName[name.toLowerCase()] = { id: def.id, name, type: def.type, options: def.select?.options || [] };
@@ -754,7 +792,7 @@ async function findNotionUserIdByEmail(email) {
   if (!email) return null;
   let cursor;
   while (true) {
-    const res = await notion.users.list(cursor ? { start_cursor: cursor } : {});
+    const res = await notionThrottled.users.list(cursor ? { start_cursor: cursor } : {});
     for (const u of res.results || []) {
       if (u.type === 'person' && u.person?.email && u.person.email.toLowerCase() === email.toLowerCase()) {
         return u.id;

@@ -2,6 +2,9 @@ FROM node:20-alpine
 WORKDIR /app
 ENV NODE_ENV=production
 
+# Install wget for health checks
+RUN apk add --no-cache wget
+
 # Copy manifest + lockfile first for better layer caching
 COPY package.json package-lock.json ./
 

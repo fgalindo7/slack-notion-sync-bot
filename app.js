@@ -11,6 +11,7 @@ import { Client as Notion } from '@notionhq/client';
 import pino from 'pino';
 import pThrottle from 'p-throttle';
 import pTimeout from 'p-timeout';
+import http from 'http';
 
 // Initialize structured logger
 const logger = pino({
@@ -690,6 +691,9 @@ async function notifyNotionPerms({ client, channel, ts, suffix = '' }) {
  */
 app.event('message', async ({ event, client }) => {
   try {
+    // Update last activity time for health check
+    lastActivityTime = Date.now();
+    
     // Ignore non-user-generated subtypes except edits (handled below)
     if (event.subtype && event.subtype !== 'message_changed') return;
     if (WATCH_CHANNEL_ID && event.channel !== WATCH_CHANNEL_ID) return;
@@ -1067,6 +1071,14 @@ async function gracefulShutdown(signal) {
   logger.info({ signal }, 'Received shutdown signal, starting graceful shutdown');
   
   try {
+    // Mark as unhealthy
+    isHealthy = false;
+    
+    // Stop health check server
+    healthServer.close(() => {
+      logger.info('Health check server closed');
+    });
+    
     // Stop accepting new events from Slack
     await app.stop();
     logger.info('Slack Bolt app stopped successfully');
@@ -1086,6 +1098,44 @@ async function gracefulShutdown(signal) {
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
+/**
+ * Health check state
+ * Tracks whether the bot is ready and healthy
+ */
+let isHealthy = false;
+let lastActivityTime = Date.now();
+
+/**
+ * Simple HTTP health check endpoint
+ * Returns 200 if the bot is connected and healthy, 503 otherwise
+ */
+const healthServer = http.createServer((req, res) => {
+  if (req.url === '/health' || req.url === '/') {
+    const now = Date.now();
+    const timeSinceActivity = now - lastActivityTime;
+    const maxIdleTime = 300000; // 5 minutes
+    
+    if (isHealthy && timeSinceActivity < maxIdleTime) {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ 
+        status: 'healthy', 
+        uptime: process.uptime(),
+        lastActivity: new Date(lastActivityTime).toISOString()
+      }));
+    } else {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ 
+        status: 'unhealthy',
+        reason: !isHealthy ? 'not_ready' : 'no_recent_activity',
+        uptime: process.uptime()
+      }));
+    }
+  } else {
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Not Found');
+  }
+});
+
 // Startup
 (async () => {
   try { 
@@ -1094,6 +1144,14 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
   } catch (e) { 
     logger.error({ error: e.message, databaseId: NOTION_DATABASE_ID }, 'Failed to load Notion schema');
   }
+  
   await app.start(process.env.PORT || 1987);
+  isHealthy = true; // Mark as healthy after successful Slack connection
   logger.info({ port: process.env.PORT || 1987, mode: 'Socket Mode' }, '⚡️ On-call auto ingestor running');
+  
+  // Start health check server
+  const healthPort = parseInt(process.env.HEALTH_PORT || '3000', 10);
+  healthServer.listen(healthPort, () => {
+    logger.info({ healthPort }, 'Health check endpoint available at /health');
+  });
 })();

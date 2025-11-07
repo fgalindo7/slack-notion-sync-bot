@@ -6,9 +6,10 @@ services:
     restart: unless-stopped
     env_file: .env
     # No ports needed for Socket Mode; Slack connects out to Slack, and Slack to you via websockets.
-    # If you want health monitoring, add a sidecar or use `docker inspect`/logs.
+    # Health check endpoint is internal only (not exposed)
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"process.exit(0)\""]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
+      start_period: 10s

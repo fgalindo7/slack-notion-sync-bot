@@ -107,7 +107,7 @@ function parseNeededByString(input) {
 
 /* ----------------- Parsing + validation ----------------- */
 function parseAutoBlock(text = '') {
-  const cleaned = text.replace(/^\s*@auto\s*\n?/i, '');
+  const cleaned = text.replace(/^\s*@(auto|cat|peepo)\s*\n?/i, '');
   const pick = (label) => {
     const re = new RegExp(
       `^\\s*${label}\\s*:\\s*([\\s\\S]*?)(?=^\\s*\\w[\\w\\s/]*:\\s*|$)`,
@@ -179,12 +179,28 @@ async function createOrUpdateNotionPage({ parsed, permalink, slackTs, reporterMe
   setProp(props, 'Customer', parsed.customer);
   setProp(props, '1Password', parsed.onepass);
   setProp(props, 'Needed by', parsed.needed);
-  // Reported by: if Notion column is People, set person by Notion user id; otherwise store mention text
+  // Reported by: respect actual Notion property type; write fallback to "Reported by (text)" when People cannot be set
   const reportedMeta = SCHEMA.byName['reported by'];
-  if (reportedMeta && reportedMeta.type === 'people' && reporterNotionId) {
-    props[reportedMeta.name] = { people: [{ id: reporterNotionId }] };
-  } else if (reporterMention) {
-    setProp(props, 'Reported by', reporterMention);
+  const reportedTextMeta = SCHEMA.byName['reported by (text)'];
+  if (reportedMeta) {
+    if (reportedMeta.type === 'people') {
+      if (reporterNotionId) {
+        props[reportedMeta.name] = { people: [{ id: reporterNotionId }] };
+      } else {
+        // People field exists but we cannot resolve a Notion person. Do not write text here; instead use fallback text column if present.
+        if (reportedTextMeta && reporterMention) {
+          setProp(props, reportedTextMeta.name, reporterMention);
+        } else {
+          console.warn("[warn] 'Reported by' is People but reporterNotionId is missing; no 'Reported by (text)' fallback column found.");
+        }
+      }
+    } else {
+      // Non-people field: store mention text via type-aware setProp
+      if (reporterMention) setProp(props, reportedMeta.name, reporterMention);
+    }
+  } else if (reportedTextMeta && reporterMention) {
+    // If there is no 'Reported by' property but there is a fallback text column, set it
+    setProp(props, reportedTextMeta.name, reporterMention);
   }
 
   // Slack Message TS (preferred unique key)

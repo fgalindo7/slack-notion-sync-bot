@@ -95,6 +95,25 @@ const DEFAULTS = {
   DB_TITLE: process.env.DEFAULT_DB_TITLE || 'On-call Issue Tracker DB'
 };
 
+// Pre-compiled regex patterns for performance
+const REGEX = {
+  // Date parsing patterns
+  US_DATE_WITH_TIME: /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):?(\d{2})?\s*(am|pm)?$/i,
+  US_DATE_WITH_HOUR: /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2})(am|pm)$/i,
+  ISO_DATE_WITH_TIME: /^(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):?(\d{2})?\s*(am|pm)?$/i,
+  
+  // Email normalization patterns
+  MAILTO_LINK: /^<mailto:([^>|]+)(?:\|([^>]+))?>$/i,
+  ANGLE_BRACKETS: /^<([^>]+)>$/,
+  EMAIL_VALIDATION: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+  
+  // URL extraction
+  URL_PATTERN: /(https?:\/\/[^\s<>]+)/gi,
+  
+  // Trigger detection
+  TRIGGER_PREFIX: /^\s*@(auto|cat|peepo)\s*\n?/i
+};
+
 // Validate default values
 if (DEFAULTS.NEEDED_BY_DAYS < 1 || DEFAULTS.NEEDED_BY_DAYS > 365) {
   logger.warn({ value: DEFAULTS.NEEDED_BY_DAYS }, 'DEFAULT_NEEDED_BY_DAYS out of range (1-365), using 30');
@@ -238,7 +257,7 @@ function parseNeededByString(input) {
     const year = yyyy.length === 2 ? 2000 + Number(yyyy) : Number(yyyy);
     const monthIdx = Number(mm) - 1;
     const day = Number(dd);
-    let hours = hh ? Number(hh) : 17;
+    let hours = hh ? Number(hh) : DEFAULTS.NEEDED_BY_HOUR;
     const minutes = min ? Number(min) : (hh ? 0 : 0);
 
     if (ampm) {
@@ -252,14 +271,14 @@ function parseNeededByString(input) {
   }
 
   // 3) Match "YYYY-MM-DD [time]"
-  const reIsoish = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2})(?::(\d{2}))?\s*([AaPp][Mm])?)?$/;
-  const m2 = s.match(reIsoish);
+  const re2 = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2})(?::(\d{2}))?\s*([AaPp][Mm])?)?$/;
+  const m2 = s.match(re2);
   if (m2) {
     const [, yyyy, mm, dd, hh, min, ampm] = m2;
     const year = Number(yyyy);
     const monthIdx = Number(mm) - 1;
     const day = Number(dd);
-    let hours = hh ? Number(hh) : 17;
+    let hours = hh ? Number(hh) : DEFAULTS.NEEDED_BY_HOUR;
     const minutes = min ? Number(min) : (hh ? 0 : 0);
 
     if (ampm) {
@@ -288,12 +307,12 @@ function normalizeEmail(s) {
   if (!s) {return '';}
   const t = String(s).trim();
   // Slack often sends emails as <mailto:addr@domain.com|addr@domain.com>
-  const mailto = /^<mailto:([^>|]+)(?:\|([^>]+))?>$/i.exec(t);
+  const mailto = REGEX.MAILTO_LINK.exec(t);
   if (mailto) {
     return (mailto[2] || mailto[1] || '').trim();
   }
   // Sometimes Slack wraps plain values like <addr@domain.com>
-  const angle = /^<([^>]+)>$/.exec(t);
+  const angle = REGEX.ANGLE_BRACKETS.exec(t);
   if (angle) {return angle[1].trim();}
   return t;
 }
@@ -315,7 +334,7 @@ function normalizeEmail(s) {
  * @returns {string} returns.linksText - Full text content of relevant links field
  */
 function parseAutoBlock(text = '') {
-  const cleaned = text.replace(/^\s*@(auto|cat|peepo)\s*\n?/i, '');
+  const cleaned = text.replace(REGEX.TRIGGER_PREFIX, '');
   const pick = (label) => {
     const re = new RegExp(
       `^\\s*${label}\\s*:\\s*([\\s\\S]*?)(?=^\\s*\\w[\\w\\s/]*:\\s*|$)`,
@@ -354,7 +373,7 @@ function parseAutoBlock(text = '') {
   }
   const links     = pick('Relevant\\s*Links?');
 
-  const urls = Array.from(links.matchAll(/https?:\/\/\S+/g)).map(m => m[0]);
+  const urls = Array.from(links.matchAll(REGEX.URL_PATTERN)).map(m => m[0]);
 
   return { priority, issue, replicate, customer, onepass, needed, neededRaw, neededValid, urls, linksText: links };
 }
@@ -411,8 +430,8 @@ function missingFields(parsed) {
  */
 function typeIssues(parsed) {
   const issues = [];
-  // Inline email check (avoids dependency on global isEmail)
-  const isEmailInline = (s) => !!(s && typeof s === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim()));
+  // Inline email check using pre-compiled regex
+  const isEmailInline = (s) => !!(s && typeof s === 'string' && REGEX.EMAIL_VALIDATION.test(s.trim()));
 
   // 1Password must be an email
   if (parsed.onepass) {

@@ -18,6 +18,8 @@ import { getConfig } from './lib/config.js';
 import { NOTION_FIELDS, DEFAULTS, API_TIMEOUT, setDefaults, setApiTimeout } from './lib/constants.js';
 import { parseAutoBlock, parseNeededByString, normalizeEmail } from './lib/parser.js';
 import { missingFields, typeIssues, isTopLevel, getTrigger, suffixForTrigger } from './lib/validation.js';
+import { BotMetrics } from './lib/metrics.js';
+import { NotionSchemaCache } from './lib/schema-cache.js';
 
 // Load and validate configuration
 const config = getConfig();
@@ -56,16 +58,8 @@ const withTimeout = (promise, ms = config.api.timeout, operation = 'Operation') 
   });
 };
 
-// Metrics tracking
-const metrics = {
-  messagesProcessed: 0,
-  messagesCreated: 0,
-  messagesUpdated: 0,
-  messagesFailed: 0,
-  validationErrors: 0,
-  apiTimeouts: 0,
-  startTime: Date.now()
-};
+// Initialize metrics tracking
+const metrics = new BotMetrics();
 
 const app = new App({
   token: config.slack.botToken,
@@ -349,7 +343,8 @@ async function replyInvalid({ client, channel, ts, issues, suffix = '' }) {
  * @returns {Promise<void>}
  */
 async function replyCreated({ client, channel, ts, pageUrl, parsed, suffix = '' }) {
-  const dbPart = SCHEMA?.dbUrl ? `<${SCHEMA.dbUrl}|${SCHEMA.dbTitle || DEFAULTS.DB_TITLE}>` : 'Notion DB';
+  const schema = schemaCache.getCurrent();
+  const dbPart = schema?.dbUrl ? `<${schema.dbUrl}|${schema.dbTitle || DEFAULTS.DB_TITLE}>` : 'Notion DB';
   const pagePart = `<${pageUrl}|${parsed?.issue || 'Notion Page'}>`;
   const text = `✅ Tracked: ${dbPart} › ${pagePart}` + suffix;
   await client.chat.postMessage({ channel, thread_ts: ts, text });
@@ -367,7 +362,8 @@ async function replyCreated({ client, channel, ts, pageUrl, parsed, suffix = '' 
  * @returns {Promise<void>}
  */
 async function replyUpdated({ client, channel, ts, pageUrl, parsed, suffix = '' }) {
-  const dbPart = SCHEMA?.dbUrl ? `<${SCHEMA.dbUrl}|${SCHEMA.dbTitle || DEFAULTS.DB_TITLE}>` : 'Notion DB';
+  const schema = schemaCache.getCurrent();
+  const dbPart = schema?.dbUrl ? `<${schema.dbUrl}|${schema.dbTitle || DEFAULTS.DB_TITLE}>` : 'Notion DB';
   const pagePart = `<${pageUrl}|${parsed?.issue || 'Notion Page'}>`;
   const text = `🔄 Updated: ${dbPart} › ${pagePart}` + suffix;
   await client.chat.postMessage({ channel, thread_ts: ts, text });
@@ -402,7 +398,8 @@ function isNotionPermError(err) {
  * @returns {Promise<void>}
  */
 async function notifyNotionPerms({ client, channel, ts, suffix = '' }) {
-  const dbPart = SCHEMA?.dbUrl ? `<${SCHEMA.dbUrl}|${SCHEMA.dbTitle || DEFAULTS.DB_TITLE}>` : 'the Notion database';
+  const schema = schemaCache.getCurrent();
+  const dbPart = schema?.dbUrl ? `<${schema.dbUrl}|${schema.dbTitle || DEFAULTS.DB_TITLE}>` : 'the Notion database';
   const text =
     `❗ I couldn't write to Notion due to *insufficient permissions*.\n` +
     `Please make sure your Notion integration is connected to ${dbPart} with *Can edit* access:\n` +
@@ -447,12 +444,12 @@ app.event('message', async ({ event, client }) => {
       return; 
     }
 
-    metrics.messagesProcessed++;
+    metrics.increment('messagesProcessed');
     logger.info({ 
       trigger, 
       channel: event.channel, 
       user: event.user,
-      metricsTotal: metrics.messagesProcessed
+      metricsTotal: metrics.get('messagesProcessed')
     }, 'Processing message');
 
     const parsed = parseAutoBlock(event.text || '');
@@ -469,14 +466,14 @@ app.event('message', async ({ event, client }) => {
     );
 
     if (miss.length) {
-      metrics.validationErrors++;
+      metrics.increment('validationErrors');
       logger.warn({ missingFields: miss, channel: event.channel }, 'Validation failed: missing fields');
       await replyMissing({ client, channel: event.channel, ts: event.ts, fields: miss, suffix });
       return;
     }
 
     if (issues.length) {
-      metrics.validationErrors++;
+      metrics.increment('validationErrors');
       logger.warn({ issues, channel: event.channel }, 'Validation failed: type issues');
       await replyInvalid({ client, channel: event.channel, ts: event.ts, issues, suffix });
       return;
@@ -500,18 +497,18 @@ app.event('message', async ({ event, client }) => {
       
       const processingTime = Date.now() - startTime;
       if (isUpdate) {
-        metrics.messagesUpdated++;
+        metrics.increment('messagesUpdated');
         logger.info({ 
           pageUrl: url, 
           processingTime,
-          metricsUpdated: metrics.messagesUpdated
+          metricsUpdated: metrics.get('messagesUpdated')
         }, 'Notion page updated');
       } else {
-        metrics.messagesCreated++;
+        metrics.increment('messagesCreated');
         logger.info({ 
           pageUrl: url, 
           processingTime,
-          metricsCreated: metrics.messagesCreated
+          metricsCreated: metrics.get('messagesCreated')
         }, 'Notion page created');
       }
       
@@ -522,13 +519,13 @@ app.event('message', async ({ event, client }) => {
         return;
       }
       if (err.name === 'TimeoutError') {
-        metrics.apiTimeouts++;
-        metrics.messagesFailed++;
+        metrics.increment('apiTimeouts');
+        metrics.increment('messagesFailed');
         logger.error({ 
           error: err.message, 
           channel: event.channel, 
           ts: event.ts,
-          metricsTimeouts: metrics.apiTimeouts
+          metricsTimeouts: metrics.get('apiTimeouts')
         }, 'API timeout');
         await client.chat.postMessage({
           channel: event.channel,
@@ -540,13 +537,13 @@ app.event('message', async ({ event, client }) => {
       throw err; // let outer handler log other errors
     }
   } catch (err) {
-    metrics.messagesFailed++;
+    metrics.increment('messagesFailed');
     logger.error({ 
       error: err.message, 
       stack: err.stack,
       channel: event.channel,
       ts: event.ts,
-      metricsFailed: metrics.messagesFailed
+      metricsFailed: metrics.get('messagesFailed')
     }, 'Message handler error');
   }
 });
@@ -580,12 +577,12 @@ async function handleEdit({ event, client }) {
   }
   const suffix = suffixForTrigger(trigger);
 
-  metrics.messagesProcessed++;
+  metrics.increment('messagesProcessed');
   logger.info({ 
     trigger, 
     channel, 
     type: 'edit',
-    metricsTotal: metrics.messagesProcessed
+    metricsTotal: metrics.get('messagesProcessed')
   }, 'Processing message edit');
 
   const parsed = parseAutoBlock(newMsg.text || '');
@@ -602,14 +599,14 @@ async function handleEdit({ event, client }) {
   );
 
   if (miss.length) {
-    metrics.validationErrors++;
+    metrics.increment('validationErrors');
     logger.warn({ missingFields: miss, channel }, 'Edit validation failed: missing fields');
     await replyMissing({ client, channel, ts: origTs, fields: miss, suffix });
     return;
   }
 
   if (issues.length) {
-    metrics.validationErrors++;
+    metrics.increment('validationErrors');
     logger.warn({ issues, channel }, 'Edit validation failed: type issues');
     await replyInvalid({ client, channel, ts: origTs, issues, suffix });
     return;
@@ -629,12 +626,12 @@ async function handleEdit({ event, client }) {
     });
     
     const processingTime = Date.now() - startTime;
-    metrics.messagesUpdated++;
+    metrics.increment('messagesUpdated');
     logger.info({ 
       pageUrl: url, 
       processingTime,
       type: 'edit',
-      metricsUpdated: metrics.messagesUpdated
+      metricsUpdated: metrics.get('messagesUpdated')
     }, 'Notion page updated from edit');
     
     await replyUpdated({ client, channel, ts: origTs, pageUrl: url, parsed, suffix });
@@ -644,14 +641,14 @@ async function handleEdit({ event, client }) {
       return;
     }
     if (err.name === 'TimeoutError') {
-      metrics.apiTimeouts++;
-      metrics.messagesFailed++;
+      metrics.increment('apiTimeouts');
+      metrics.increment('messagesFailed');
       logger.error({ 
         error: err.message, 
         channel, 
         ts: origTs,
         type: 'edit',
-        metricsTimeouts: metrics.apiTimeouts
+        metricsTimeouts: metrics.get('apiTimeouts')
       }, 'API timeout on edit');
       await client.chat.postMessage({
         channel,
@@ -668,27 +665,20 @@ async function handleEdit({ event, client }) {
  * Cached Notion database schema information
  * @type {Object|null}
  */
-let SCHEMA = null;
-
-/**
- * Timestamp when schema was last loaded
- * @type {number|null}
- */
-let SCHEMA_LOADED_AT = null;
-
-/**
- * Schema cache TTL in milliseconds (default: 1 hour)
- */
+// Initialize Notion schema cache
 const SCHEMA_CACHE_TTL = parseInt(process.env.SCHEMA_CACHE_TTL || '3600000', 10);
+const schemaCache = new NotionSchemaCache({ 
+  ttl: SCHEMA_CACHE_TTL, 
+  logger 
+});
 
 /**
- * Loads and caches the Notion database schema
+ * Loads the Notion database schema
  * Discovers property types and identifies Slack message tracking columns
- * @param {boolean} [force=false] - Force reload even if cache is valid
  * @returns {Promise<Object>} Schema object with property mappings and database metadata
  * @throws {Error} If required tracking columns (Slack Message URL or Slack Message TS) are not found
  */
-async function loadSchema(force = false) {
+async function loadSchemaFromNotion() {
   const db = await notionThrottled.databases.retrieve({ database_id: config.notion.databaseId });
   const byName = {};
   for (const [name, def] of Object.entries(db.properties || {})) {
@@ -723,44 +713,27 @@ async function loadSchema(force = false) {
   }
 
   const dbTitle = (db.title && db.title[0] && db.title[0].plain_text) ? db.title[0].plain_text : DEFAULTS.DB_TITLE;
-  SCHEMA = { byName, slackUrlProp, slackTsProp, dbUrl: db.url, dbTitle };
-  SCHEMA_LOADED_AT = Date.now();
-  
-  logger.info({ 
-    databaseId: config.notion.databaseId, 
-    propertyCount: Object.keys(byName).length,
-    cacheTtl: SCHEMA_CACHE_TTL,
-    forced: force
-  }, 'Schema loaded and cached');
-  
-  return SCHEMA;
+  return { byName, slackUrlProp, slackTsProp, dbUrl: db.url, dbTitle };
 }
 
 /**
  * Gets the current schema, loading or refreshing if necessary
- * Automatically refreshes if cache has expired
+ * Uses NotionSchemaCache for automatic TTL-based refresh
  * @returns {Promise<Object>} Current schema object
  */
 async function getSchema() {
-  // Initial load
-  if (!SCHEMA || !SCHEMA_LOADED_AT) {
-    return await loadSchema();
-  }
-  
-  // Check if cache has expired
-  const age = Date.now() - SCHEMA_LOADED_AT;
-  if (age > SCHEMA_CACHE_TTL) {
-    logger.info({ cacheAge: age, ttl: SCHEMA_CACHE_TTL }, 'Schema cache expired, refreshing');
-    try {
-      return await loadSchema();
-    } catch (err) {
-      logger.error({ error: err.message }, 'Failed to refresh schema, using cached version');
-      // Return stale cache rather than failing
-      return SCHEMA;
+  try {
+    return await schemaCache.get(() => loadSchemaFromNotion());
+  } catch (err) {
+    logger.error({ error: err.message }, 'Failed to load schema');
+    // If we have a cached version (even if expired), return it
+    const cached = schemaCache.getCurrent();
+    if (cached) {
+      logger.warn('Using stale cached schema due to load failure');
+      return cached;
     }
+    throw err;
   }
-  
-  return SCHEMA;
 }
 
 /**
@@ -816,7 +789,7 @@ async function resolveNotionPersonForSlackUser(slackUserId, client) {
 }
 
 /**
- * Sets a Notion property value respecting its type from the database schema
+ * Sets a property on a Notion page properties object
  * Automatically converts values to the appropriate format for each property type
  * @param {Object} props - Properties object to modify
  * @param {string} name - Property name
@@ -824,7 +797,7 @@ async function resolveNotionPersonForSlackUser(slackUserId, client) {
  * @param {Object} schema - The schema object containing property metadata
  * @returns {void}
  */
-function setProp(props, name, value, schema = SCHEMA) {
+function setProp(props, name, value, schema) {
   if (value === undefined || value === null) {return;}
   const meta = schema?.byName[name.toLowerCase()];
   if (!meta) {return;}
@@ -931,13 +904,7 @@ const healthServer = http.createServer((req, res) => {
         status: 'healthy', 
         uptime,
         lastActivity: new Date(lastActivityTime).toISOString(),
-        metrics: {
-          ...metrics,
-          uptimeSeconds: Math.floor(uptime),
-          successRate: metrics.messagesProcessed > 0 
-            ? ((metrics.messagesProcessed - metrics.messagesFailed) / metrics.messagesProcessed * 100).toFixed(2) + '%'
-            : 'N/A'
-        }
+        metrics: metrics.toJSON()
       }));
     } else {
       res.writeHead(503, { 'Content-Type': 'application/json' });
@@ -945,19 +912,13 @@ const healthServer = http.createServer((req, res) => {
         status: 'unhealthy',
         reason: !isHealthy ? 'not_ready' : 'no_recent_activity',
         uptime,
-        metrics
+        metrics: metrics.toJSON()
       }));
     }
   } else if (req.url === '/metrics') {
     // Dedicated metrics endpoint
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      ...metrics,
-      uptime: process.uptime(),
-      successRate: metrics.messagesProcessed > 0 
-        ? ((metrics.messagesProcessed - metrics.messagesFailed) / metrics.messagesProcessed * 100).toFixed(2) + '%'
-        : 'N/A'
-    }, null, 2));
+    res.end(JSON.stringify(metrics.toJSON(), null, 2));
   } else {
     res.writeHead(404, { 'Content-Type': 'text/plain' });
     res.end('Not Found');
@@ -967,7 +928,7 @@ const healthServer = http.createServer((req, res) => {
 // Startup
 (async () => {
   try { 
-    await loadSchema();
+    await getSchema();
     logger.info({ databaseId: config.notion.databaseId }, 'Notion schema loaded successfully');
   } catch (e) { 
     logger.error({ error: e.message, databaseId: config.notion.databaseId }, 'Failed to load Notion schema');
@@ -984,17 +945,8 @@ const healthServer = http.createServer((req, res) => {
   
   // Log metrics every 5 minutes
   const metricsInterval = setInterval(() => {
-    const uptime = process.uptime();
-    const successRate = metrics.messagesProcessed > 0 
-      ? ((metrics.messagesProcessed - metrics.messagesFailed) / metrics.messagesProcessed * 100).toFixed(2)
-      : 0;
-    
     logger.info({ 
-      metrics: {
-        ...metrics,
-        uptimeSeconds: Math.floor(uptime),
-        successRate: `${successRate}%`
-      }
+      metrics: metrics.toJSON()
     }, 'Periodic metrics report');
   }, 300000); // 5 minutes
   

@@ -371,12 +371,25 @@ function typeIssues(parsed) {
     // Accept simple valid emails; reject only if obviously invalid
     const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!validEmail.test(value)) {
-      issues.push('1Password must be an email address (e.g., oncall@company.com).');
+      issues.push(
+        `1Password field must be an email address.\n` +
+        `Got: "${parsed.onepass}"\n` +
+        `Expected format: user@company.com`
+      );
     }
   }
   // Warn if user provided Needed by but it was unparsable
   if (parsed.neededRaw && !parsed.neededValid) {
-    issues.push('Needed by date/time format not recognized. Examples: 11/04/2025 7PM · 11/04/2025 · 2025-11-04 19:00');
+    issues.push(
+      `Needed by date/time format not recognized: "${parsed.neededRaw}"\n\n` +
+      `*Accepted formats:*\n` +
+      `• \`MM/DD/YYYY\` → 11/04/2025 (defaults to 5PM)\n` +
+      `• \`MM/DD/YYYY HH:MM AM/PM\` → 11/04/2025 7:30 PM\n` +
+      `• \`MM/DD/YYYY HPM\` → 11/04/2025 7PM\n` +
+      `• \`YYYY-MM-DD\` → 2025-11-04 (defaults to 5PM)\n` +
+      `• \`YYYY-MM-DD HH:MM\` → 2025-11-04 19:00\n\n` +
+      `If omitted entirely, defaults to 30 days from today at 5PM.`
+    );
   }
   return issues;
 }
@@ -522,9 +535,22 @@ async function findPageForMessage({ slackTs, permalink }) {
 async function replyMissing({ client, channel, ts, fields, suffix = '' }) {
   const lines = fields.map(f => `• ${f}`).join('\n');
   const text =
-    `❗ I couldn't track this yet — the following fields are missing:\n${lines}\n\n` +
-    `Please *edit the original message* to include the missing fields (keep the trigger line at the top: @auto / @cat / @peepo). ` +
-    `I'll pick up the edit automatically.`;
+    `❗ *Missing Required Fields*\n\n` +
+    `The following fields are required:\n${lines}\n\n` +
+    `*How to fix:* Edit your original message and add the missing fields.\n` +
+    `Keep the trigger at the top (@auto, @cat, or @peepo).\n\n` +
+    `Example:\n` +
+    `\`\`\`\n` +
+    `@auto\n` +
+    `Priority: P1\n` +
+    `Issue: Production API timeout\n` +
+    `How to replicate: Try checking out\n` +
+    `Customer: Acme Corp\n` +
+    `1Password: oncall@company.com\n` +
+    `Needed by: 11/08/2025 5PM\n` +
+    `Relevant Links: https://status.example.com\n` +
+    `\`\`\`\n` +
+    `I'll automatically detect your edit and create the Notion page! 🚀`;
   await client.chat.postMessage({ channel, thread_ts: ts, text: text + suffix });
 }
 
@@ -539,10 +565,16 @@ async function replyMissing({ client, channel, ts, fields, suffix = '' }) {
  * @returns {Promise<void>}
  */
 async function replyInvalid({ client, channel, ts, issues, suffix = '' }) {
-  const lines = issues.map(f => `• ${f}`).join('\n');
   const text =
-    `❗ Some fields have the wrong format:\n${lines}\n\n` +
-    `Please *edit the original message* and fix the formatting. I'll pick up the edit automatically.`;
+    `❗ *Format Validation Failed*\n\n` +
+    issues.map(issue => {
+      // Check if issue already has bullet formatting
+      if (issue.includes('\n')) {
+        return issue; // Multi-line issues are already formatted
+      }
+      return `• ${issue}`;
+    }).join('\n\n') +
+    `\n\n*How to fix:* Edit your original message with the correct format. I'll automatically detect the edit and retry! 🔄`;
   await client.chat.postMessage({ channel, thread_ts: ts, text: text + suffix });
 }
 

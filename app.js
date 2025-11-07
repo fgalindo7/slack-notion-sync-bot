@@ -13,6 +13,11 @@ import pThrottle from 'p-throttle';
 import pTimeout from 'p-timeout';
 import http from 'http';
 
+// Import local modules
+import { NOTION_FIELDS, DEFAULTS, API_TIMEOUT } from './lib/constants.js';
+import { parseAutoBlock, parseNeededByString, normalizeEmail } from './lib/parser.js';
+import { missingFields, typeIssues, isTopLevel, getTrigger, suffixForTrigger } from './lib/validation.js';
+
 // Initialize structured logger
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
@@ -28,9 +33,6 @@ const throttle = pThrottle({
   interval: 1000, // 1 second
   strict: true
 });
-
-// Configurable timeout for API operations (in milliseconds)
-const API_TIMEOUT = parseInt(process.env.API_TIMEOUT || '10000', 10); // Default 10 seconds
 
 /**
  * Wraps a promise with a timeout to prevent hanging operations
@@ -57,62 +59,6 @@ const {
 } = process.env;
 
 const ALLOW_THREADS_BOOL = String(ALLOW_THREADS || '').toLowerCase() === 'true';
-
-// Field name constants
-const NOTION_FIELDS = {
-  ISSUE: 'Issue',
-  PRIORITY: 'Priority',
-  HOW_TO_REPLICATE: 'How to replicate',
-  CUSTOMER: 'Customer',
-  ONE_PASSWORD: '1Password',
-  NEEDED_BY: 'Needed by',
-  REPORTED_BY: 'Reported by',
-  REPORTED_BY_TEXT: 'Reported by (text)',
-  RELEVANT_LINKS: 'Relevant Links',
-  SLACK_MESSAGE_TS: 'Slack Message TS',
-  SLACK_MESSAGE_URL: 'Slack Message URL'
-};
-
-// Priority levels
-const PRIORITIES = {
-  P0: 'P0',
-  P1: 'P1',
-  P2: 'P2'
-};
-
-// Trigger keywords
-// Reserved for future use - trigger keywords for message parsing
-const _TRIGGERS = {
-  AUTO: 'auto',
-  CAT: 'cat',
-  PEEPO: 'peepo'
-};
-
-// Default values (configurable via environment variables)
-const DEFAULTS = {
-  NEEDED_BY_DAYS: parseInt(process.env.DEFAULT_NEEDED_BY_DAYS || '30', 10),
-  NEEDED_BY_HOUR: parseInt(process.env.DEFAULT_NEEDED_BY_HOUR || '17', 10), // 5PM
-  DB_TITLE: process.env.DEFAULT_DB_TITLE || 'On-call Issue Tracker DB'
-};
-
-// Pre-compiled regex patterns for performance
-const REGEX = {
-  // Date parsing patterns
-  US_DATE_WITH_TIME: /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):?(\d{2})?\s*(am|pm)?$/i,
-  US_DATE_WITH_HOUR: /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2})(am|pm)$/i,
-  ISO_DATE_WITH_TIME: /^(\d{4})-(\d{1,2})-(\d{1,2})\s+(\d{1,2}):?(\d{2})?\s*(am|pm)?$/i,
-  
-  // Email normalization patterns
-  MAILTO_LINK: /^<mailto:([^>|]+)(?:\|([^>]+))?>$/i,
-  ANGLE_BRACKETS: /^<([^>]+)>$/,
-  EMAIL_VALIDATION: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-  
-  // URL extraction
-  URL_PATTERN: /(https?:\/\/[^\s<>]+)/gi,
-  
-  // Trigger detection
-  TRIGGER_PREFIX: /^\s*@(auto|cat|peepo)\s*\n?/i
-};
 
 // Validate default values
 if (DEFAULTS.NEEDED_BY_DAYS < 1 || DEFAULTS.NEEDED_BY_DAYS > 365) {
@@ -231,236 +177,6 @@ process.on('unhandledRejection', (reason) => {
   }
   logger.fatal({ reason: err.message, stack: err.stack }, 'Unhandled promise rejection');
 });
-
-/**
- * Parses a "needed by" date/time string supporting multiple formats
- * Supports ISO dates, MM/DD/YYYY with optional time, and YYYY-MM-DD formats
- * @param {string} input - The date string to parse (e.g., "11/04/2025 7PM", "2025-11-04", "11/04/2025")
- * @returns {Date|null} Parsed Date object or null if parsing fails
- * @example
- * parseNeededByString("11/04/2025 7PM") // Returns Date at 7PM on Nov 4, 2025
- * parseNeededByString("2025-11-04") // Returns Date at 5PM (default) on Nov 4, 2025
- */
-function parseNeededByString(input) {
-  if (!input) {return null;}
-  const s = String(input).trim();
-
-  // 1) Try ISO or Date.parse-friendly first
-  const isoTry = new Date(s);
-  if (!isNaN(isoTry)) {return isoTry;}
-
-  // 2) Match "MM/DD/YYYY [time]" where time can be "7PM", "7 PM", "7:30 pm", "19:00"
-  const re = /^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})(?:\s+(\d{1,2})(?::(\d{2}))?\s*([AaPp][Mm])?)?$/;
-  const m = s.match(re);
-  if (m) {
-    const [, mm, dd, yyyy, hh, min, ampm] = m;
-    const year = yyyy.length === 2 ? 2000 + Number(yyyy) : Number(yyyy);
-    const monthIdx = Number(mm) - 1;
-    const day = Number(dd);
-    let hours = hh ? Number(hh) : DEFAULTS.NEEDED_BY_HOUR;
-    const minutes = min ? Number(min) : (hh ? 0 : 0);
-
-    if (ampm) {
-      const ap = ampm.toLowerCase();
-      if (ap === 'pm' && hours < 12) {hours += 12;}
-      if (ap === 'am' && hours === 12) {hours = 0;}
-    }
-
-    const d = new Date(year, monthIdx, day, hours, minutes, 0, 0);
-    if (!isNaN(d)) {return d;}
-  }
-
-  // 3) Match "YYYY-MM-DD [time]"
-  const re2 = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2})(?::(\d{2}))?\s*([AaPp][Mm])?)?$/;
-  const m2 = s.match(re2);
-  if (m2) {
-    const [, yyyy, mm, dd, hh, min, ampm] = m2;
-    const year = Number(yyyy);
-    const monthIdx = Number(mm) - 1;
-    const day = Number(dd);
-    let hours = hh ? Number(hh) : DEFAULTS.NEEDED_BY_HOUR;
-    const minutes = min ? Number(min) : (hh ? 0 : 0);
-
-    if (ampm) {
-      const ap = ampm.toLowerCase();
-      if (ap === 'pm' && hours < 12) {hours += 12;}
-      if (ap === 'am' && hours === 12) {hours = 0;}
-    }
-
-    const d = new Date(year, monthIdx, day, hours, minutes, 0, 0);
-    if (!isNaN(d)) {return d;}
-  }
-
-  return null; // let caller decide a default
-}
-
-/**
- * Normalizes Slack email formats to plain email addresses
- * Handles Slack's mailto links and angle-bracket wrapping
- * @param {string} s - The potentially Slack-formatted email string
- * @returns {string} Plain email address without Slack formatting
- * @example
- * normalizeEmail("<mailto:user@example.com|user@example.com>") // Returns "user@example.com"
- * normalizeEmail("<user@example.com>") // Returns "user@example.com"
- */
-function normalizeEmail(s) {
-  if (!s) {return '';}
-  const t = String(s).trim();
-  // Slack often sends emails as <mailto:addr@domain.com|addr@domain.com>
-  const mailto = REGEX.MAILTO_LINK.exec(t);
-  if (mailto) {
-    return (mailto[2] || mailto[1] || '').trim();
-  }
-  // Sometimes Slack wraps plain values like <addr@domain.com>
-  const angle = REGEX.ANGLE_BRACKETS.exec(t);
-  if (angle) {return angle[1].trim();}
-  return t;
-}
-
-/**
- * Parses a message block for on-call issue tracking fields
- * Extracts Priority, Issue, How to replicate, Customer, 1Password, Needed by, and Relevant Links
- * @param {string} text - The message text to parse (with @auto/@cat/@peepo trigger)
- * @returns {Object} Parsed fields object
- * @returns {string} returns.priority - Issue priority (P0/P1/P2)
- * @returns {string} returns.issue - Description of the issue
- * @returns {string} returns.replicate - Steps to replicate the issue
- * @returns {string} returns.customer - Customer name or identifier
- * @returns {string} returns.onepass - 1Password email for access
- * @returns {Date} returns.needed - Parsed needed-by date (with default if not provided)
- * @returns {string} returns.neededRaw - Raw needed-by input string
- * @returns {boolean} returns.neededValid - Whether the needed-by date was successfully parsed
- * @returns {string[]} returns.urls - Array of extracted URLs from relevant links
- * @returns {string} returns.linksText - Full text content of relevant links field
- */
-function parseAutoBlock(text = '') {
-  const cleaned = text.replace(REGEX.TRIGGER_PREFIX, '');
-  const pick = (label) => {
-    const re = new RegExp(
-      `^\\s*${label}\\s*:\\s*([\\s\\S]*?)(?=^\\s*\\w[\\w\\s/]*:\\s*|$)`,
-      'mi'
-    );
-    const m = re.exec(cleaned);
-    return m ? m[1].trim() : '';
-  };
-
-  let priority = pick('Priority').toUpperCase().replace(/\s+/g, '');
-  if (![PRIORITIES.P0, PRIORITIES.P1, PRIORITIES.P2].includes(priority)) {priority = '';}
-
-  const issue     = pick('Issue');
-  const replicate = pick('How\\s*to\\s*replicate');
-  const customer  = pick('Customer');
-  const onepass   = pick('1\\s*Password');
-  const neededRaw = pick('Needed\\s*by\\s*(?:date/?time)?');
-
-  function defaultNeeded() {
-    const d = new Date();
-    d.setDate(d.getDate() + DEFAULTS.NEEDED_BY_DAYS);
-    d.setHours(DEFAULTS.NEEDED_BY_HOUR, 0, 0, 0);
-    return d;
-  }
-
-  let neededValid = true;
-  let needed = defaultNeeded();
-  if (neededRaw) {
-    const parsed = parseNeededByString(neededRaw);
-    if (parsed && !isNaN(parsed)) {
-      needed = parsed;
-    } else {
-      neededValid = false; // default & tell user how to fix
-      needed = defaultNeeded();
-    }
-  }
-  const links     = pick('Relevant\\s*Links?');
-
-  const urls = Array.from(links.matchAll(REGEX.URL_PATTERN)).map(m => m[0]);
-
-  return { priority, issue, replicate, customer, onepass, needed, neededRaw, neededValid, urls, linksText: links };
-}
-
-/**
- * Checks if a Slack event is a top-level message (not a thread reply)
- * @param {Object} evt - Slack event object
- * @returns {boolean} True if the message is top-level, false if it's in a thread
- */
-const isTopLevel = (evt) => !(evt?.thread_ts && evt.thread_ts !== evt.ts);
-
-/**
- * Extracts the trigger keyword from message text
- * @param {string} text - Message text to check
- * @returns {string|null} The trigger word ('auto', 'cat', or 'peepo') or null if no trigger found
- */
-const getTrigger = (text) => {
-  const m = /^\s*@(auto|cat|peepo)\b/i.exec(text || '');
-  return m ? m[1].toLowerCase() : null;
-};
-
-/**
- * Returns an emoji suffix based on the trigger keyword used
- * @param {string} t - The trigger keyword ('auto', 'cat', or 'peepo')
- * @returns {string} Emoji suffix string for the response message
- */
-const suffixForTrigger = (t) => {
-  if (t === 'cat') {return ' 🐈';}
-  if (t === 'peepo') {return ' :peepo-yessir:';}
-  return '';
-};
-
-/**
- * Identifies which required fields are missing from a parsed message
- * @param {Object} parsed - Parsed message object from parseAutoBlock()
- * @returns {string[]} Array of missing field names
- */
-function missingFields(parsed) {
-  const missing = [];
-  if (!parsed.priority) {missing.push('Priority (P0/P1/P2)');}
-  if (!parsed.issue) {missing.push('Issue');}
-  if (!parsed.replicate) {missing.push('How to replicate');}
-  if (!parsed.customer) {missing.push('Customer');}
-  if (!parsed.onepass) {missing.push('1Password (email)');}
-  // Needed by defaults; Relevant Links optional
-  return missing;
-}
-
-/**
- * Validates field types and formats in a parsed message
- * Checks 1Password email format and needed-by date parsing
- * @param {Object} parsed - Parsed message object from parseAutoBlock()
- * @returns {string[]} Array of validation error messages
- */
-function typeIssues(parsed) {
-  const issues = [];
-  // Inline email check using pre-compiled regex
-  const isEmailInline = (s) => !!(s && typeof s === 'string' && REGEX.EMAIL_VALIDATION.test(s.trim()));
-
-  // 1Password must be an email
-  if (parsed.onepass) {
-    const value = normalizeEmail(parsed.onepass);
-    if (!isEmailInline(value)) {
-      issues.push(
-        `1Password field must be an email address.\n` +
-        `Got: "${parsed.onepass}"\n` +
-        `Expected format: user@company.com`
-      );
-    }
-  }
-  // Warn if user provided Needed by but it was unparsable
-  if (parsed.neededRaw && !parsed.neededValid) {
-    const defaultHour = DEFAULTS.NEEDED_BY_HOUR;
-    const defaultTime = defaultHour === 0 ? '12AM' : defaultHour < 12 ? `${defaultHour}AM` : defaultHour === 12 ? '12PM' : `${defaultHour - 12}PM`;
-    issues.push(
-      `Needed by date/time format not recognized: "${parsed.neededRaw}"\n\n` +
-      `*Accepted formats:*\n` +
-      `• \`MM/DD/YYYY\` → 11/04/2025 (defaults to ${defaultTime})\n` +
-      `• \`MM/DD/YYYY HH:MM AM/PM\` → 11/04/2025 7:30 PM\n` +
-      `• \`MM/DD/YYYY HPM\` → 11/04/2025 7PM\n` +
-      `• \`YYYY-MM-DD\` → 2025-11-04 (defaults to ${defaultTime})\n` +
-      `• \`YYYY-MM-DD HH:MM\` → 2025-11-04 19:00\n\n` +
-      `If omitted entirely, defaults to ${DEFAULTS.NEEDED_BY_DAYS} days from today at ${defaultTime}.`
-    );
-  }
-  return issues;
-}
 
 /**
  * Creates a new Notion page or updates an existing one with issue tracking data

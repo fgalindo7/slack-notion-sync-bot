@@ -11,8 +11,9 @@ COPY package.json package-lock.json ./
 # Install prod deps only (npm v9+ uses --omit=dev)
 RUN npm ci --omit=dev
 
-# Copy the app
+# Copy the app and lib modules
 COPY app.js ./
+COPY lib ./lib
 
 # (optional) expose a health port only if you added a health endpoint
 # EXPOSE 1987

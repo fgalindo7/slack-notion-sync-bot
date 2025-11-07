@@ -395,19 +395,19 @@ function typeIssues(parsed) {
  * @throws {Error} Throws if Notion API call fails (including permission errors)
  */
 async function createOrUpdateNotionPage({ parsed, permalink, slackTs, reporterMention, reporterNotionId, pageId }) {
-  if (!SCHEMA) await loadSchema();
+  const schema = await getSchema();
 
   const props = {};
-  setProp(props, 'Issue', parsed.issue || '(no issue given)');
-  setProp(props, 'Priority', parsed.priority);
-  setProp(props, 'How to replicate', parsed.replicate);
-  setProp(props, 'Customer', parsed.customer);
+  setProp(props, 'Issue', parsed.issue || '(no issue given)', schema);
+  setProp(props, 'Priority', parsed.priority, schema);
+  setProp(props, 'How to replicate', parsed.replicate, schema);
+  setProp(props, 'Customer', parsed.customer, schema);
   const onepassEmail = normalizeEmail(parsed.onepass);
-  setProp(props, '1Password', onepassEmail);
-  setProp(props, 'Needed by', parsed.needed);
+  setProp(props, '1Password', onepassEmail, schema);
+  setProp(props, 'Needed by', parsed.needed, schema);
   // Reported by: respect actual Notion property type; write fallback to "Reported by (text)" when People cannot be set
-  const reportedMeta = SCHEMA.byName['reported by'];
-  const reportedTextMeta = SCHEMA.byName['reported by (text)'];
+  const reportedMeta = schema.byName['reported by'];
+  const reportedTextMeta = schema.byName['reported by (text)'];
   if (reportedMeta) {
       if (reportedMeta.type === 'people') {
       if (reporterNotionId) {
@@ -415,43 +415,43 @@ async function createOrUpdateNotionPage({ parsed, permalink, slackTs, reporterMe
       } else {
         // People field exists but we cannot resolve a Notion person. Do not write text here; instead use fallback text column if present.
         if (reportedTextMeta && reporterMention) {
-          setProp(props, reportedTextMeta.name, reporterMention);
+          setProp(props, reportedTextMeta.name, reporterMention, schema);
         } else {
           logger.warn({ reporterMention }, "'Reported by' is People but reporterNotionId is missing; no 'Reported by (text)' fallback column found");
         }
       }
     } else {
       // Non-people field: store mention text via type-aware setProp
-      if (reporterMention) setProp(props, reportedMeta.name, reporterMention);
+      if (reporterMention) setProp(props, reportedMeta.name, reporterMention, schema);
     }
   } else if (reportedTextMeta && reporterMention) {
     // If there is no 'Reported by' property but there is a fallback text column, set it
-    setProp(props, reportedTextMeta.name, reporterMention);
+    setProp(props, reportedTextMeta.name, reporterMention, schema);
   }
 
   // Slack Message TS (preferred unique key)
-  if (SCHEMA.slackTsProp) {
-    if (SCHEMA.slackTsProp.type === 'number') {
+  if (schema.slackTsProp) {
+    if (schema.slackTsProp.type === 'number') {
       // Use integer seconds (ts before the dot) to keep it clean, or store full float
       const num = Number(String(slackTs).replace('.', '')); // full precision as integer
-      props[SCHEMA.slackTsProp.name] = { number: Number.isFinite(num) ? num : undefined };
+      props[schema.slackTsProp.name] = { number: Number.isFinite(num) ? num : undefined };
     } else {
-      props[SCHEMA.slackTsProp.name] = { rich_text: [{ type: 'text', text: { content: String(slackTs) } }] };
+      props[schema.slackTsProp.name] = { rich_text: [{ type: 'text', text: { content: String(slackTs) } }] };
     }
   }
 
   // Slack Message URL (secondary key)
-  if (SCHEMA.slackUrlProp) {
-    if (SCHEMA.slackUrlProp.type === 'url') {
-      props[SCHEMA.slackUrlProp.name] = { url: permalink };
+  if (schema.slackUrlProp) {
+    if (schema.slackUrlProp.type === 'url') {
+      props[schema.slackUrlProp.name] = { url: permalink };
     } else {
-      props[SCHEMA.slackUrlProp.name] = { rich_text: [{ type: 'text', text: { content: permalink } }] };
+      props[schema.slackUrlProp.name] = { rich_text: [{ type: 'text', text: { content: permalink } }] };
     }
   }
 
   // Relevant Links: URL (first) or all links as rich_text
-  if (SCHEMA.byName['relevant links']) {
-    const meta = SCHEMA.byName['relevant links'];
+  if (schema.byName['relevant links']) {
+    const meta = schema.byName['relevant links'];
     if (meta.type === 'url') {
       if (parsed.urls?.[0]) props['Relevant Links'] = { url: parsed.urls[0] };
     } else {
@@ -482,26 +482,26 @@ async function createOrUpdateNotionPage({ parsed, permalink, slackTs, reporterMe
  * @returns {Promise<Object|null>} Notion page object if found, null otherwise
  */
 async function findPageForMessage({ slackTs, permalink }) {
-  if (!SCHEMA) await loadSchema();
+  const schema = await getSchema();
 
   // 1) Try by TS (exact)
-  if (SCHEMA.slackTsProp) {
+  if (schema.slackTsProp) {
     let tsFilter;
-    if (SCHEMA.slackTsProp.type === 'number') {
+    if (schema.slackTsProp.type === 'number') {
       const num = Number(String(slackTs).replace('.', ''));
-      tsFilter = { property: SCHEMA.slackTsProp.name, number: { equals: num } };
+      tsFilter = { property: schema.slackTsProp.name, number: { equals: num } };
     } else {
-      tsFilter = { property: SCHEMA.slackTsProp.name, rich_text: { equals: String(slackTs) } };
+      tsFilter = { property: schema.slackTsProp.name, rich_text: { equals: String(slackTs) } };
     }
     const byTs = await notionThrottled.databases.query({ database_id: NOTION_DATABASE_ID, filter: tsFilter, page_size: 1 });
     if (byTs.results?.[0]) return byTs.results[0];
   }
 
   // 2) Fall back to permalink
-  if (SCHEMA.slackUrlProp && permalink) {
-    const urlFilter = SCHEMA.slackUrlProp.type === 'url'
-      ? { property: SCHEMA.slackUrlProp.name, url: { equals: permalink } }
-      : { property: SCHEMA.slackUrlProp.name, rich_text: { contains: permalink } };
+  if (schema.slackUrlProp && permalink) {
+    const urlFilter = schema.slackUrlProp.type === 'url'
+      ? { property: schema.slackUrlProp.name, url: { equals: permalink } }
+      : { property: schema.slackUrlProp.name, rich_text: { contains: permalink } };
     const byUrl = await notionThrottled.databases.query({ database_id: NOTION_DATABASE_ID, filter: urlFilter, page_size: 1 });
     if (byUrl.results?.[0]) return byUrl.results[0];
   }
@@ -802,12 +802,24 @@ async function handleEdit({ event, client }) {
 let SCHEMA = null;
 
 /**
+ * Timestamp when schema was last loaded
+ * @type {number|null}
+ */
+let SCHEMA_LOADED_AT = null;
+
+/**
+ * Schema cache TTL in milliseconds (default: 1 hour)
+ */
+const SCHEMA_CACHE_TTL = parseInt(process.env.SCHEMA_CACHE_TTL || '3600000', 10);
+
+/**
  * Loads and caches the Notion database schema
  * Discovers property types and identifies Slack message tracking columns
+ * @param {boolean} [force=false] - Force reload even if cache is valid
  * @returns {Promise<Object>} Schema object with property mappings and database metadata
  * @throws {Error} If required tracking columns (Slack Message URL or Slack Message TS) are not found
  */
-async function loadSchema() {
+async function loadSchema(force = false) {
   const db = await notionThrottled.databases.retrieve({ database_id: NOTION_DATABASE_ID });
   const byName = {};
   for (const [name, def] of Object.entries(db.properties || {})) {
@@ -843,6 +855,42 @@ async function loadSchema() {
 
   const dbTitle = (db.title && db.title[0] && db.title[0].plain_text) ? db.title[0].plain_text : 'On-call Issue Tracker DB';
   SCHEMA = { byName, slackUrlProp, slackTsProp, dbUrl: db.url, dbTitle };
+  SCHEMA_LOADED_AT = Date.now();
+  
+  logger.info({ 
+    databaseId: NOTION_DATABASE_ID, 
+    propertyCount: Object.keys(byName).length,
+    cacheTtl: SCHEMA_CACHE_TTL,
+    forced: force
+  }, 'Schema loaded and cached');
+  
+  return SCHEMA;
+}
+
+/**
+ * Gets the current schema, loading or refreshing if necessary
+ * Automatically refreshes if cache has expired
+ * @returns {Promise<Object>} Current schema object
+ */
+async function getSchema() {
+  // Initial load
+  if (!SCHEMA || !SCHEMA_LOADED_AT) {
+    return await loadSchema();
+  }
+  
+  // Check if cache has expired
+  const age = Date.now() - SCHEMA_LOADED_AT;
+  if (age > SCHEMA_CACHE_TTL) {
+    logger.info({ cacheAge: age, ttl: SCHEMA_CACHE_TTL }, 'Schema cache expired, refreshing');
+    try {
+      return await loadSchema();
+    } catch (err) {
+      logger.error({ error: err.message }, 'Failed to refresh schema, using cached version');
+      // Return stale cache rather than failing
+      return SCHEMA;
+    }
+  }
+  
   return SCHEMA;
 }
 
@@ -902,11 +950,12 @@ async function resolveNotionPersonForSlackUser(slackUserId, client) {
  * @param {Object} props - Properties object to modify
  * @param {string} name - Property name
  * @param {*} value - Value to set (will be converted based on property type)
+ * @param {Object} schema - The schema object containing property metadata
  * @returns {void}
  */
-function setProp(props, name, value) {
+function setProp(props, name, value, schema = SCHEMA) {
   if (value === undefined || value === null) return;
-  const meta = SCHEMA?.byName[name.toLowerCase()];
+  const meta = schema?.byName[name.toLowerCase()];
   if (!meta) return;
 
   const toStr = (v) => (v instanceof Date ? v.toISOString() : String(v));

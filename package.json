@@ -8,6 +8,8 @@
   },
   "dependencies": {
     "@notionhq/client": "^2.2.15",
-    "@slack/bolt": "^3.18.0"
+    "@slack/bolt": "^3.18.0",
+    "pino": "^10.1.0",
+    "pino-pretty": "^13.1.2"
   }
 }

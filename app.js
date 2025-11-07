@@ -8,6 +8,16 @@
 import bolt from '@slack/bolt';              // Bolt is CJS; use default import
 const { App, LogLevel } = bolt;
 import { Client as Notion } from '@notionhq/client';
+import pino from 'pino';
+
+// Initialize structured logger
+const logger = pino({
+  level: process.env.LOG_LEVEL || 'info',
+  transport: process.env.NODE_ENV !== 'production' ? {
+    target: 'pino-pretty',
+    options: { colorize: true }
+  } : undefined
+});
 
 const {
   SLACK_BOT_TOKEN,
@@ -22,7 +32,12 @@ const {
 const ALLOW_THREADS_BOOL = String(ALLOW_THREADS || '').toLowerCase() === 'true';
 
 if (!SLACK_BOT_TOKEN || !SLACK_APP_LEVEL_TOKEN || !NOTION_TOKEN || !NOTION_DATABASE_ID) {
-  console.error('Missing required env vars. Check .env file.');
+  logger.error({ 
+    slackBotToken: !!SLACK_BOT_TOKEN,
+    slackAppToken: !!SLACK_APP_LEVEL_TOKEN, 
+    notionToken: !!NOTION_TOKEN,
+    notionDbId: !!NOTION_DATABASE_ID
+  }, 'Missing required environment variables');
   process.exit(1);
 }
 
@@ -48,19 +63,19 @@ function isExplicitSocketDisconnect(err) {
 }
 process.on('uncaughtException', (err) => {
   if (isExplicitSocketDisconnect(err)) {
-    console.warn('[warn] Ignoring transient Slack Socket Mode explicit disconnect during connect; library will reconnect.');
+    logger.warn({ error: err.message }, 'Ignoring transient Slack Socket Mode disconnect; library will reconnect');
     return; // do not crash
   }
-  console.error('[fatal] Uncaught exception:', err);
+  logger.fatal({ error: err.message, stack: err.stack }, 'Uncaught exception');
   // You can choose to exit here; keep alive to let Docker restart via healthcheck if needed.
 });
 process.on('unhandledRejection', (reason) => {
   const err = reason instanceof Error ? reason : new Error(String(reason));
   if (isExplicitSocketDisconnect(err)) {
-    console.warn('[warn] Ignoring transient Slack Socket Mode explicit disconnect during connect (promise rejection).');
+    logger.warn({ error: err.message }, 'Ignoring transient Slack Socket Mode disconnect (promise rejection)');
     return;
   }
-  console.error('[fatal] Unhandled rejection:', reason);
+  logger.fatal({ reason: err.message, stack: err.stack }, 'Unhandled promise rejection');
 });
 
 /**
@@ -318,7 +333,7 @@ async function createOrUpdateNotionPage({ parsed, permalink, slackTs, reporterMe
   const reportedMeta = SCHEMA.byName['reported by'];
   const reportedTextMeta = SCHEMA.byName['reported by (text)'];
   if (reportedMeta) {
-    if (reportedMeta.type === 'people') {
+      if (reportedMeta.type === 'people') {
       if (reporterNotionId) {
         props[reportedMeta.name] = { people: [{ id: reporterNotionId }] };
       } else {
@@ -326,7 +341,7 @@ async function createOrUpdateNotionPage({ parsed, permalink, slackTs, reporterMe
         if (reportedTextMeta && reporterMention) {
           setProp(props, reportedTextMeta.name, reporterMention);
         } else {
-          console.warn("[warn] 'Reported by' is People but reporterNotionId is missing; no 'Reported by (text)' fallback column found.");
+          logger.warn({ reporterMention }, "'Reported by' is People but reporterNotionId is missing; no 'Reported by (text)' fallback column found");
         }
       }
     } else {
@@ -494,10 +509,10 @@ async function replyUpdated({ client, channel, ts, pageUrl, parsed, suffix = '' 
 // --- Bolt error handler (middleware/runtime) ---
 app.error(async (error) => {
   if (isExplicitSocketDisconnect(error)) {
-    console.warn('[warn] Bolt reported explicit Socket Mode disconnect; continuing.');
+    logger.warn({ error: error.message }, 'Bolt reported explicit Socket Mode disconnect; continuing');
     return;
   }
-  console.error('[error] Bolt app error:', error);
+  logger.error({ error: error.message, stack: error.stack }, 'Bolt app error');
 });
 
 /**
@@ -600,7 +615,12 @@ app.event('message', async ({ event, client }) => {
       throw err; // let outer handler log other errors
     }
   } catch (err) {
-    console.error('message handler error:', err);
+    logger.error({ 
+      error: err.message, 
+      stack: err.stack,
+      channel: event.channel,
+      ts: event.ts 
+    }, 'Message handler error');
   }
 });
 
@@ -825,7 +845,12 @@ function setProp(props, name, value) {
 }
 
 (async () => {
-  try { await loadSchema(); } catch (e) { console.error('Notion schema error:', e.message); }
+  try { 
+    await loadSchema();
+    logger.info({ databaseId: NOTION_DATABASE_ID }, 'Notion schema loaded successfully');
+  } catch (e) { 
+    logger.error({ error: e.message, databaseId: NOTION_DATABASE_ID }, 'Failed to load Notion schema');
+  }
   await app.start(process.env.PORT || 1987);
-  console.log('⚡️ On-call auto ingestor running (Socket Mode)');
+  logger.info({ port: process.env.PORT || 1987, mode: 'Socket Mode' }, '⚡️ On-call auto ingestor running');
 })();

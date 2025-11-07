@@ -4,7 +4,9 @@
   "type": "module",
   "main": "app.js",
   "scripts": {
-    "start": "node app.js"
+    "start": "node app.js",
+    "lint": "eslint app.js notion-check.mjs",
+    "lint:fix": "eslint app.js notion-check.mjs --fix"
   },
   "dependencies": {
     "@notionhq/client": "^2.2.15",
@@ -13,5 +15,8 @@
     "p-timeout": "^7.0.1",
     "pino": "^10.1.0",
     "pino-pretty": "^13.1.2"
+  },
+  "devDependencies": {
+    "eslint": "^9.39.1"
   }
 }

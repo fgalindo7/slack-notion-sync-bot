@@ -81,7 +81,8 @@ const PRIORITIES = {
 };
 
 // Trigger keywords
-const TRIGGERS = {
+// Reserved for future use - trigger keywords for message parsing
+const _TRIGGERS = {
   AUTO: 'auto',
   CAT: 'cat',
   PEEPO: 'peepo'
@@ -211,18 +212,18 @@ process.on('unhandledRejection', (reason) => {
  * parseNeededByString("2025-11-04") // Returns Date at 5PM (default) on Nov 4, 2025
  */
 function parseNeededByString(input) {
-  if (!input) return null;
+  if (!input) {return null;}
   const s = String(input).trim();
 
   // 1) Try ISO or Date.parse-friendly first
   const isoTry = new Date(s);
-  if (!isNaN(isoTry)) return isoTry;
+  if (!isNaN(isoTry)) {return isoTry;}
 
   // 2) Match "MM/DD/YYYY [time]" where time can be "7PM", "7 PM", "7:30 pm", "19:00"
   const re = /^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})(?:\s+(\d{1,2})(?::(\d{2}))?\s*([AaPp][Mm])?)?$/;
   const m = s.match(re);
   if (m) {
-    let [, mm, dd, yyyy, hh, min, ampm] = m;
+    const [, mm, dd, yyyy, hh, min, ampm] = m;
     const year = yyyy.length === 2 ? 2000 + Number(yyyy) : Number(yyyy);
     const monthIdx = Number(mm) - 1;
     const day = Number(dd);
@@ -231,19 +232,19 @@ function parseNeededByString(input) {
 
     if (ampm) {
       const ap = ampm.toLowerCase();
-      if (ap === 'pm' && hours < 12) hours += 12;
-      if (ap === 'am' && hours === 12) hours = 0;
+      if (ap === 'pm' && hours < 12) {hours += 12;}
+      if (ap === 'am' && hours === 12) {hours = 0;}
     }
 
     const d = new Date(year, monthIdx, day, hours, minutes, 0, 0);
-    if (!isNaN(d)) return d;
+    if (!isNaN(d)) {return d;}
   }
 
   // 3) Match "YYYY-MM-DD [time]"
   const reIsoish = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2})(?::(\d{2}))?\s*([AaPp][Mm])?)?$/;
   const m2 = s.match(reIsoish);
   if (m2) {
-    let [, yyyy, mm, dd, hh, min, ampm] = m2;
+    const [, yyyy, mm, dd, hh, min, ampm] = m2;
     const year = Number(yyyy);
     const monthIdx = Number(mm) - 1;
     const day = Number(dd);
@@ -252,12 +253,12 @@ function parseNeededByString(input) {
 
     if (ampm) {
       const ap = ampm.toLowerCase();
-      if (ap === 'pm' && hours < 12) hours += 12;
-      if (ap === 'am' && hours === 12) hours = 0;
+      if (ap === 'pm' && hours < 12) {hours += 12;}
+      if (ap === 'am' && hours === 12) {hours = 0;}
     }
 
     const d = new Date(year, monthIdx, day, hours, minutes, 0, 0);
-    if (!isNaN(d)) return d;
+    if (!isNaN(d)) {return d;}
   }
 
   return null; // let caller decide a default
@@ -273,8 +274,8 @@ function parseNeededByString(input) {
  * normalizeEmail("<user@example.com>") // Returns "user@example.com"
  */
 function normalizeEmail(s) {
-  if (!s) return '';
-  let t = String(s).trim();
+  if (!s) {return '';}
+  const t = String(s).trim();
   // Slack often sends emails as <mailto:addr@domain.com|addr@domain.com>
   const mailto = /^<mailto:([^>|]+)(?:\|([^>]+))?>$/i.exec(t);
   if (mailto) {
@@ -282,7 +283,7 @@ function normalizeEmail(s) {
   }
   // Sometimes Slack wraps plain values like <addr@domain.com>
   const angle = /^<([^>]+)>$/.exec(t);
-  if (angle) return angle[1].trim();
+  if (angle) {return angle[1].trim();}
   return t;
 }
 
@@ -314,7 +315,7 @@ function parseAutoBlock(text = '') {
   };
 
   let priority = pick('Priority').toUpperCase().replace(/\s+/g, '');
-  if (![PRIORITIES.P0, PRIORITIES.P1, PRIORITIES.P2].includes(priority)) priority = '';
+  if (![PRIORITIES.P0, PRIORITIES.P1, PRIORITIES.P2].includes(priority)) {priority = '';}
 
   const issue     = pick('Issue');
   const replicate = pick('How\\s*to\\s*replicate');
@@ -370,8 +371,8 @@ const getTrigger = (text) => {
  * @returns {string} Emoji suffix string for the response message
  */
 const suffixForTrigger = (t) => {
-  if (t === 'cat') return ' 🐈';
-  if (t === 'peepo') return ' :peepo-yessir:';
+  if (t === 'cat') {return ' 🐈';}
+  if (t === 'peepo') {return ' :peepo-yessir:';}
   return '';
 };
 
@@ -382,11 +383,11 @@ const suffixForTrigger = (t) => {
  */
 function missingFields(parsed) {
   const missing = [];
-  if (!parsed.priority) missing.push('Priority (P0/P1/P2)');
-  if (!parsed.issue) missing.push('Issue');
-  if (!parsed.replicate) missing.push('How to replicate');
-  if (!parsed.customer) missing.push('Customer');
-  if (!parsed.onepass) missing.push('1Password (email)');
+  if (!parsed.priority) {missing.push('Priority (P0/P1/P2)');}
+  if (!parsed.issue) {missing.push('Issue');}
+  if (!parsed.replicate) {missing.push('How to replicate');}
+  if (!parsed.customer) {missing.push('Customer');}
+  if (!parsed.onepass) {missing.push('1Password (email)');}
   // Needed by defaults; Relevant Links optional
   return missing;
 }
@@ -405,9 +406,7 @@ function typeIssues(parsed) {
   // 1Password must be an email
   if (parsed.onepass) {
     const value = normalizeEmail(parsed.onepass);
-    // Accept simple valid emails; reject only if obviously invalid
-    const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!validEmail.test(value)) {
+    if (!isEmailInline(value)) {
       issues.push(
         `1Password field must be an email address.\n` +
         `Got: "${parsed.onepass}"\n` +
@@ -474,7 +473,7 @@ async function createOrUpdateNotionPage({ parsed, permalink, slackTs, reporterMe
       }
     } else {
       // Non-people field: store mention text via type-aware setProp
-      if (reporterMention) setProp(props, reportedMeta.name, reporterMention, schema);
+      if (reporterMention) {setProp(props, reportedMeta.name, reporterMention, schema);}
     }
   } else if (reportedTextMeta && reporterMention) {
     // If there is no 'Reported by' property but there is a fallback text column, set it
@@ -505,9 +504,9 @@ async function createOrUpdateNotionPage({ parsed, permalink, slackTs, reporterMe
   if (schema.byName[NOTION_FIELDS.RELEVANT_LINKS.toLowerCase()]) {
     const meta = schema.byName[NOTION_FIELDS.RELEVANT_LINKS.toLowerCase()];
     if (meta.type === 'url') {
-      if (parsed.urls?.[0]) props[NOTION_FIELDS.RELEVANT_LINKS] = { url: parsed.urls[0] };
+      if (parsed.urls?.[0]) {props[NOTION_FIELDS.RELEVANT_LINKS] = { url: parsed.urls[0] };}
     } else {
-      if (parsed.linksText) props[NOTION_FIELDS.RELEVANT_LINKS] = { rich_text: [{ type: 'text', text: { content: parsed.linksText } }] };
+      if (parsed.linksText) {props[NOTION_FIELDS.RELEVANT_LINKS] = { rich_text: [{ type: 'text', text: { content: parsed.linksText } }] };}
     }
   }
 
@@ -546,7 +545,7 @@ async function findPageForMessage({ slackTs, permalink }) {
       tsFilter = { property: schema.slackTsProp.name, rich_text: { equals: String(slackTs) } };
     }
     const byTs = await notionThrottled.databases.query({ database_id: NOTION_DATABASE_ID, filter: tsFilter, page_size: 1 });
-    if (byTs.results?.[0]) return byTs.results[0];
+    if (byTs.results?.[0]) {return byTs.results[0];}
   }
 
   // 2) Fall back to permalink
@@ -555,7 +554,7 @@ async function findPageForMessage({ slackTs, permalink }) {
       ? { property: schema.slackUrlProp.name, url: { equals: permalink } }
       : { property: schema.slackUrlProp.name, rich_text: { contains: permalink } };
     const byUrl = await notionThrottled.databases.query({ database_id: NOTION_DATABASE_ID, filter: urlFilter, page_size: 1 });
-    if (byUrl.results?.[0]) return byUrl.results[0];
+    if (byUrl.results?.[0]) {return byUrl.results[0];}
   }
 
   return null;
@@ -690,7 +689,9 @@ async function notifyNotionPerms({ client, channel, ts, suffix = '' }) {
     `- Then try your message again (or edit the same message).` + suffix;
   try {
     await client.chat.postMessage({ channel, thread_ts: ts, text });
-  } catch (_) { /* ignore secondary errors */ }
+  } catch {
+    // Ignore secondary errors when posting to thread
+  }
 }
 
 /**
@@ -707,8 +708,8 @@ app.event('message', async ({ event, client }) => {
     lastActivityTime = Date.now();
     
     // Ignore non-user-generated subtypes except edits (handled below)
-    if (event.subtype && event.subtype !== 'message_changed') return;
-    if (WATCH_CHANNEL_ID && event.channel !== WATCH_CHANNEL_ID) return;
+    if (event.subtype && event.subtype !== 'message_changed') {return;}
+    if (WATCH_CHANNEL_ID && event.channel !== WATCH_CHANNEL_ID) {return;}
 
     // Handle edits (message_changed) separately
     if (event.subtype === 'message_changed') {
@@ -909,7 +910,7 @@ async function loadSchema(force = false) {
     'message url'
   ];
   let slackUrlProp = null;
-  for (const n of permalinkCandidates) if (byName[n]) { slackUrlProp = byName[n]; break; }
+  for (const n of permalinkCandidates) {if (byName[n]) { slackUrlProp = byName[n]; break; }}
 
   // Find Slack TS by common names (Text or Number)
   const tsCandidates = [
@@ -918,7 +919,7 @@ async function loadSchema(force = false) {
     'message ts'
   ];
   let slackTsProp = null;
-  for (const n of tsCandidates) if (byName[n]) { slackTsProp = byName[n]; break; }
+  for (const n of tsCandidates) {if (byName[n]) { slackTsProp = byName[n]; break; }}
 
   if (!slackUrlProp && !slackTsProp) {
     throw new Error(
@@ -975,7 +976,7 @@ async function getSchema() {
  * @returns {Promise<string|null>} Notion user ID if found, null otherwise
  */
 async function findNotionUserIdByEmail(email) {
-  if (!email) return null;
+  if (!email) {return null;}
   let cursor;
   while (true) {
     const res = await notionThrottled.users.list(cursor ? { start_cursor: cursor } : {});
@@ -984,7 +985,7 @@ async function findNotionUserIdByEmail(email) {
         return u.id;
       }
     }
-    if (!res.has_more) break;
+    if (!res.has_more) {break;}
     cursor = res.next_cursor;
   }
   return null;
@@ -1001,7 +1002,7 @@ async function findNotionUserIdByEmail(email) {
  */
 async function resolveNotionPersonForSlackUser(slackUserId, client) {
   try {
-    if (!slackUserId) return { mention: '', notionId: null };
+    if (!slackUserId) {return { mention: '', notionId: null };}
     const info = await withTimeout(
       client.users.info({ user: slackUserId }),
       API_TIMEOUT,
@@ -1009,10 +1010,12 @@ async function resolveNotionPersonForSlackUser(slackUserId, client) {
     );
     const email = info?.user?.profile?.email || null;
     const mention = `<@${slackUserId}>`;
-    if (!email) return { mention, notionId: null }; // requires users:read.email; fallback to mention text
+    if (!email) {
+      return { mention, notionId: null };
+    } // requires users:read.email; fallback to mention text
     const notionId = await findNotionUserIdByEmail(email);
     return { mention, notionId };
-  } catch (_) {
+  } catch {
     // On any failure, return mention only
     return { mention: slackUserId ? `<@${slackUserId}>` : '', notionId: null };
   }
@@ -1028,9 +1031,9 @@ async function resolveNotionPersonForSlackUser(slackUserId, client) {
  * @returns {void}
  */
 function setProp(props, name, value, schema = SCHEMA) {
-  if (value === undefined || value === null) return;
+  if (value === undefined || value === null) {return;}
   const meta = schema?.byName[name.toLowerCase()];
-  if (!meta) return;
+  if (!meta) {return;}
 
   const toStr = (v) => (v instanceof Date ? v.toISOString() : String(v));
 
@@ -1050,7 +1053,7 @@ function setProp(props, name, value, schema = SCHEMA) {
         dt = value;
       } else if (typeof value === 'string') {
         dt = parseNeededByString(value);
-        if (!dt || isNaN(dt)) dt = new Date(value);
+        if (!dt || isNaN(dt)) {dt = new Date(value);}
       }
       if (dt && !isNaN(dt)) {
         props[name] = { date: { start: dt.toISOString() } };

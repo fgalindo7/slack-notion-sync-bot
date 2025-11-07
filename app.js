@@ -16,7 +16,7 @@ import http from 'http';
 // Import local modules
 import { getConfig } from './lib/config.js';
 import { NOTION_FIELDS, DEFAULTS, API_TIMEOUT, setDefaults, setApiTimeout } from './lib/constants.js';
-import { parseAutoBlock, parseNeededByString, normalizeEmail } from './lib/parser.js';
+import { parseAutoBlock, parseNeededByString, normalizeEmail, stripRichTextFormatting } from './lib/parser.js';
 import { missingFields, typeIssues, isTopLevel, getTrigger, suffixForTrigger } from './lib/validation.js';
 import { BotMetrics } from './lib/metrics.js';
 import { NotionSchemaCache } from './lib/schema-cache.js';
@@ -791,6 +791,7 @@ async function resolveNotionPersonForSlackUser(slackUserId, client) {
 /**
  * Sets a property on a Notion page properties object
  * Automatically converts values to the appropriate format for each property type
+ * Strips rich text formatting (* and _) from all fields except "Reported by (text)"
  * @param {Object} props - Properties object to modify
  * @param {string} name - Property name
  * @param {*} value - Value to set (will be converted based on property type)
@@ -803,16 +804,23 @@ function setProp(props, name, value, schema) {
   if (!meta) {return;}
 
   const toStr = (v) => (v instanceof Date ? v.toISOString() : String(v));
+  
+  // Strip rich text formatting for all fields except "Reported by (text)"
+  const shouldStripFormatting = name.toLowerCase() !== NOTION_FIELDS.REPORTED_BY_TEXT.toLowerCase();
+  const processValue = (v) => {
+    const str = toStr(v);
+    return shouldStripFormatting ? stripRichTextFormatting(str) : str;
+  };
 
   switch (meta.type) {
     case 'title':
-      props[name] = { title: [{ type: 'text', text: { content: toStr(value) } }] };
+      props[name] = { title: [{ type: 'text', text: { content: processValue(value) } }] };
       break;
     case 'rich_text':
-      props[name] = { rich_text: [{ type: 'text', text: { content: toStr(value) } }] };
+      props[name] = { rich_text: [{ type: 'text', text: { content: processValue(value) } }] };
       break;
     case 'select':
-      props[name] = { select: { name: toStr(value) } };
+      props[name] = { select: { name: processValue(value) } };
       break;
     case 'date': {
       let dt = null;
@@ -829,17 +837,17 @@ function setProp(props, name, value, schema) {
       break;
     }
     case 'url':
-      props[name] = { url: toStr(value) };
+      props[name] = { url: processValue(value) };
       break;
     case 'number':
       props[name] = { number: typeof value === 'number' ? value : Number(value) };
       break;
     case 'email':
-      props[name] = { email: toStr(value) };
+      props[name] = { email: processValue(value) };
       break;
     default:
       // Fallback to rich_text
-      props[name] = { rich_text: [{ type: 'text', text: { content: toStr(value) } }] };
+      props[name] = { rich_text: [{ type: 'text', text: { content: processValue(value) } }] };
   }
 }
 

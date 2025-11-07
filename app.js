@@ -57,6 +57,42 @@ const {
 
 const ALLOW_THREADS_BOOL = String(ALLOW_THREADS || '').toLowerCase() === 'true';
 
+// Field name constants
+const NOTION_FIELDS = {
+  ISSUE: 'Issue',
+  PRIORITY: 'Priority',
+  HOW_TO_REPLICATE: 'How to replicate',
+  CUSTOMER: 'Customer',
+  ONE_PASSWORD: '1Password',
+  NEEDED_BY: 'Needed by',
+  REPORTED_BY: 'Reported by',
+  REPORTED_BY_TEXT: 'Reported by (text)',
+  RELEVANT_LINKS: 'Relevant Links',
+  SLACK_MESSAGE_TS: 'Slack Message TS',
+  SLACK_MESSAGE_URL: 'Slack Message URL'
+};
+
+// Priority levels
+const PRIORITIES = {
+  P0: 'P0',
+  P1: 'P1',
+  P2: 'P2'
+};
+
+// Trigger keywords
+const TRIGGERS = {
+  AUTO: 'auto',
+  CAT: 'cat',
+  PEEPO: 'peepo'
+};
+
+// Default values
+const DEFAULTS = {
+  NEEDED_BY_DAYS: 30,
+  NEEDED_BY_HOUR: 17, // 5PM
+  DB_TITLE: 'On-call Issue Tracker DB'
+};
+
 if (!SLACK_BOT_TOKEN || !SLACK_APP_LEVEL_TOKEN || !NOTION_TOKEN || !NOTION_DATABASE_ID) {
   logger.error({ 
     slackBotToken: !!SLACK_BOT_TOKEN,
@@ -267,7 +303,7 @@ function parseAutoBlock(text = '') {
   };
 
   let priority = pick('Priority').toUpperCase().replace(/\s+/g, '');
-  if (!['P0', 'P1', 'P2'].includes(priority)) priority = '';
+  if (![PRIORITIES.P0, PRIORITIES.P1, PRIORITIES.P2].includes(priority)) priority = '';
 
   const issue     = pick('Issue');
   const replicate = pick('How\\s*to\\s*replicate');
@@ -277,8 +313,8 @@ function parseAutoBlock(text = '') {
 
   function defaultNeeded() {
     const d = new Date();
-    d.setDate(d.getDate() + 30);
-    d.setHours(17, 0, 0, 0); // default to 5pm
+    d.setDate(d.getDate() + DEFAULTS.NEEDED_BY_DAYS);
+    d.setHours(DEFAULTS.NEEDED_BY_HOUR, 0, 0, 0);
     return d;
   }
 
@@ -401,16 +437,16 @@ async function createOrUpdateNotionPage({ parsed, permalink, slackTs, reporterMe
   const schema = await getSchema();
 
   const props = {};
-  setProp(props, 'Issue', parsed.issue || '(no issue given)', schema);
-  setProp(props, 'Priority', parsed.priority, schema);
-  setProp(props, 'How to replicate', parsed.replicate, schema);
-  setProp(props, 'Customer', parsed.customer, schema);
+  setProp(props, NOTION_FIELDS.ISSUE, parsed.issue || '(no issue given)', schema);
+  setProp(props, NOTION_FIELDS.PRIORITY, parsed.priority, schema);
+  setProp(props, NOTION_FIELDS.HOW_TO_REPLICATE, parsed.replicate, schema);
+  setProp(props, NOTION_FIELDS.CUSTOMER, parsed.customer, schema);
   const onepassEmail = normalizeEmail(parsed.onepass);
-  setProp(props, '1Password', onepassEmail, schema);
-  setProp(props, 'Needed by', parsed.needed, schema);
+  setProp(props, NOTION_FIELDS.ONE_PASSWORD, onepassEmail, schema);
+  setProp(props, NOTION_FIELDS.NEEDED_BY, parsed.needed, schema);
   // Reported by: respect actual Notion property type; write fallback to "Reported by (text)" when People cannot be set
-  const reportedMeta = schema.byName['reported by'];
-  const reportedTextMeta = schema.byName['reported by (text)'];
+  const reportedMeta = schema.byName[NOTION_FIELDS.REPORTED_BY.toLowerCase()];
+  const reportedTextMeta = schema.byName[NOTION_FIELDS.REPORTED_BY_TEXT.toLowerCase()];
   if (reportedMeta) {
       if (reportedMeta.type === 'people') {
       if (reporterNotionId) {
@@ -453,12 +489,12 @@ async function createOrUpdateNotionPage({ parsed, permalink, slackTs, reporterMe
   }
 
   // Relevant Links: URL (first) or all links as rich_text
-  if (schema.byName['relevant links']) {
-    const meta = schema.byName['relevant links'];
+  if (schema.byName[NOTION_FIELDS.RELEVANT_LINKS.toLowerCase()]) {
+    const meta = schema.byName[NOTION_FIELDS.RELEVANT_LINKS.toLowerCase()];
     if (meta.type === 'url') {
-      if (parsed.urls?.[0]) props['Relevant Links'] = { url: parsed.urls[0] };
+      if (parsed.urls?.[0]) props[NOTION_FIELDS.RELEVANT_LINKS] = { url: parsed.urls[0] };
     } else {
-      if (parsed.linksText) props['Relevant Links'] = { rich_text: [{ type: 'text', text: { content: parsed.linksText } }] };
+      if (parsed.linksText) props[NOTION_FIELDS.RELEVANT_LINKS] = { rich_text: [{ type: 'text', text: { content: parsed.linksText } }] };
     }
   }
 
@@ -580,7 +616,7 @@ async function replyInvalid({ client, channel, ts, issues, suffix = '' }) {
  * @returns {Promise<void>}
  */
 async function replyCreated({ client, channel, ts, pageUrl, parsed, suffix = '' }) {
-  const dbPart = SCHEMA?.dbUrl ? `<${SCHEMA.dbUrl}|${SCHEMA.dbTitle || 'On-call Issue Tracker DB'}>` : 'Notion DB';
+  const dbPart = SCHEMA?.dbUrl ? `<${SCHEMA.dbUrl}|${SCHEMA.dbTitle || DEFAULTS.DB_TITLE}>` : 'Notion DB';
   const pagePart = `<${pageUrl}|${parsed?.issue || 'Notion Page'}>`;
   const text = `✅ Tracked: ${dbPart} › ${pagePart}` + suffix;
   await client.chat.postMessage({ channel, thread_ts: ts, text });
@@ -598,7 +634,7 @@ async function replyCreated({ client, channel, ts, pageUrl, parsed, suffix = '' 
  * @returns {Promise<void>}
  */
 async function replyUpdated({ client, channel, ts, pageUrl, parsed, suffix = '' }) {
-  const dbPart = SCHEMA?.dbUrl ? `<${SCHEMA.dbUrl}|${SCHEMA.dbTitle || 'On-call Issue Tracker DB'}>` : 'Notion DB';
+  const dbPart = SCHEMA?.dbUrl ? `<${SCHEMA.dbUrl}|${SCHEMA.dbTitle || DEFAULTS.DB_TITLE}>` : 'Notion DB';
   const pagePart = `<${pageUrl}|${parsed?.issue || 'Notion Page'}>`;
   const text = `🔄 Updated: ${dbPart} › ${pagePart}` + suffix;
   await client.chat.postMessage({ channel, thread_ts: ts, text });
@@ -633,7 +669,7 @@ function isNotionPermError(err) {
  * @returns {Promise<void>}
  */
 async function notifyNotionPerms({ client, channel, ts, suffix = '' }) {
-  const dbPart = SCHEMA?.dbUrl ? `<${SCHEMA.dbUrl}|${SCHEMA.dbTitle || 'On-call Issue Tracker DB'}>` : 'the Notion database';
+  const dbPart = SCHEMA?.dbUrl ? `<${SCHEMA.dbUrl}|${SCHEMA.dbTitle || DEFAULTS.DB_TITLE}>` : 'the Notion database';
   const text =
     `❗ I couldn't write to Notion due to *insufficient permissions*.\n` +
     `Please make sure your Notion integration is connected to ${dbPart} with *Can edit* access:\n` +
@@ -870,12 +906,12 @@ async function loadSchema(force = false) {
 
   if (!slackUrlProp && !slackTsProp) {
     throw new Error(
-      'Notion DB: add a permalink column (URL or Text) named "Slack Message URL" ' +
-      'or a TS column (Text or Number) named "Slack Message TS".'
+      `Notion DB: add a permalink column (URL or Text) named "${NOTION_FIELDS.SLACK_MESSAGE_URL}" ` +
+      `or a TS column (Text or Number) named "${NOTION_FIELDS.SLACK_MESSAGE_TS}".`
     );
   }
 
-  const dbTitle = (db.title && db.title[0] && db.title[0].plain_text) ? db.title[0].plain_text : 'On-call Issue Tracker DB';
+  const dbTitle = (db.title && db.title[0] && db.title[0].plain_text) ? db.title[0].plain_text : DEFAULTS.DB_TITLE;
   SCHEMA = { byName, slackUrlProp, slackTsProp, dbUrl: db.url, dbTitle };
   SCHEMA_LOADED_AT = Date.now();
   

@@ -13,6 +13,8 @@ const {
   ALLOW_THREADS
 } = process.env;
 
+const ALLOW_THREADS_BOOL = String(ALLOW_THREADS || '').toLowerCase() === 'true';
+
 if (!SLACK_BOT_TOKEN || !SLACK_APP_LEVEL_TOKEN || !NOTION_TOKEN || !NOTION_DATABASE_ID) {
   console.error('Missing required env vars. Check .env file.');
   process.exit(1);
@@ -105,6 +107,27 @@ function parseNeededByString(input) {
   return null; // let caller decide a default
 }
 
+// --- Simple email validator ---
+function isEmail(s) {
+  if (!s || typeof s !== 'string') return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
+}
+
+// --- Normalize Slack mailto/email tokens to plain email ---
+function normalizeEmail(s) {
+  if (!s) return '';
+  let t = String(s).trim();
+  // Slack often sends emails as <mailto:addr@domain.com|addr@domain.com>
+  const mailto = /^<mailto:([^>|]+)(?:\|([^>]+))?>$/i.exec(t);
+  if (mailto) {
+    return (mailto[2] || mailto[1] || '').trim();
+  }
+  // Sometimes Slack wraps plain values like <addr@domain.com>
+  const angle = /^<([^>]+)>$/.exec(t);
+  if (angle) return angle[1].trim();
+  return t;
+}
+
 /* ----------------- Parsing + validation ----------------- */
 function parseAutoBlock(text = '') {
   const cleaned = text.replace(/^\s*@(auto|cat|peepo)\s*\n?/i, '');
@@ -133,16 +156,22 @@ function parseAutoBlock(text = '') {
     return d;
   }
 
+  let neededValid = true;
   let needed = defaultNeeded();
   if (neededRaw) {
     const parsed = parseNeededByString(neededRaw);
-    needed = parsed && !isNaN(parsed) ? parsed : defaultNeeded();
+    if (parsed && !isNaN(parsed)) {
+      needed = parsed;
+    } else {
+      neededValid = false; // default & tell user how to fix
+      needed = defaultNeeded();
+    }
   }
   const links     = pick('Relevant\\s*Links?');
 
   const urls = Array.from(links.matchAll(/https?:\/\/\S+/g)).map(m => m[0]);
 
-  return { priority, issue, replicate, customer, onepass, needed, urls, linksText: links };
+  return { priority, issue, replicate, customer, onepass, needed, neededRaw, neededValid, urls, linksText: links };
 }
 
 const isTopLevel = (evt) => !(evt?.thread_ts && evt.thread_ts !== evt.ts);
@@ -162,9 +191,30 @@ function missingFields(parsed) {
   if (!parsed.issue) missing.push('Issue');
   if (!parsed.replicate) missing.push('How to replicate');
   if (!parsed.customer) missing.push('Customer');
-  if (!parsed.onepass) missing.push('1Password');
-  // Needed by is optional (we default). Relevant Links optional.
+  if (!parsed.onepass) missing.push('1Password (email)');
+  // Needed by defaults; Relevant Links optional
   return missing;
+}
+
+function typeIssues(parsed) {
+  const issues = [];
+  // Inline email check (avoids dependency on global isEmail)
+  const isEmailInline = (s) => !!(s && typeof s === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim()));
+
+  // 1Password must be an email
+  if (parsed.onepass) {
+    const value = normalizeEmail(parsed.onepass);
+    // Accept simple valid emails; reject only if obviously invalid
+    const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!validEmail.test(value)) {
+      issues.push('1Password must be an email address (e.g., oncall@company.com).');
+    }
+  }
+  // Warn if user provided Needed by but it was unparsable
+  if (parsed.neededRaw && !parsed.neededValid) {
+    issues.push('Needed by date/time format not recognized. Examples: 11/04/2025 7PM · 11/04/2025 · 2025-11-04 19:00');
+  }
+  return issues;
 }
 
 /* ----------------- Notion helpers ----------------- */
@@ -177,7 +227,8 @@ async function createOrUpdateNotionPage({ parsed, permalink, slackTs, reporterMe
   setProp(props, 'Priority', parsed.priority);
   setProp(props, 'How to replicate', parsed.replicate);
   setProp(props, 'Customer', parsed.customer);
-  setProp(props, '1Password', parsed.onepass);
+  const onepassEmail = normalizeEmail(parsed.onepass);
+  setProp(props, '1Password', onepassEmail);
   setProp(props, 'Needed by', parsed.needed);
   // Reported by: respect actual Notion property type; write fallback to "Reported by (text)" when People cannot be set
   const reportedMeta = SCHEMA.byName['reported by'];
@@ -281,8 +332,16 @@ async function replyMissing({ client, channel, ts, fields, suffix = '' }) {
   const lines = fields.map(f => `• ${f}`).join('\n');
   const text =
     `❗ I couldn't track this yet — the following fields are missing:\n${lines}\n\n` +
-    `Please *edit the original message* to include the missing fields (keep the *@auto* line at the top). ` +
+    `Please *edit the original message* to include the missing fields (keep the trigger line at the top: @auto / @cat / @peepo). ` +
     `I'll pick up the edit automatically.`;
+  await client.chat.postMessage({ channel, thread_ts: ts, text: text + suffix });
+}
+
+async function replyInvalid({ client, channel, ts, issues, suffix = '' }) {
+  const lines = issues.map(f => `• ${f}`).join('\n');
+  const text =
+    `❗ Some fields have the wrong format:\n${lines}\n\n` +
+    `Please *edit the original message* and fix the formatting. I'll pick up the edit automatically.`;
   await client.chat.postMessage({ channel, thread_ts: ts, text: text + suffix });
 }
 
@@ -345,12 +404,13 @@ app.event('message', async ({ event, client }) => {
     const trigger = getTrigger(event.text);
     if (!trigger) { return; }
     const suffix = suffixForTrigger(trigger);
-    if (!ALLOW_THREADS && !isTopLevel(event)) { 
+    if (!ALLOW_THREADS_BOOL && !isTopLevel(event)) { 
       return; 
     }
 
     const parsed = parseAutoBlock(event.text || '');
     const miss = missingFields(parsed);
+    const issues = typeIssues(parsed);
 
     const { permalink = '' } = await client.chat.getPermalink({
       channel: event.channel,
@@ -359,6 +419,11 @@ app.event('message', async ({ event, client }) => {
 
     if (miss.length) {
       await replyMissing({ client, channel: event.channel, ts: event.ts, fields: miss, suffix });
+      return;
+    }
+
+    if (issues.length) {
+      await replyInvalid({ client, channel: event.channel, ts: event.ts, issues, suffix });
       return;
     }
 
@@ -400,7 +465,7 @@ async function handleEdit({ event, client }) {
   const origTs = orig.ts || newMsg.ts; // fallback
 
   // Optional: enforce top-level only (ignore thread replies)
-  if (!ALLOW_THREADS && newMsg.thread_ts && newMsg.thread_ts !== newMsg.ts) { 
+  if (!ALLOW_THREADS_BOOL && newMsg.thread_ts && newMsg.thread_ts !== newMsg.ts) { 
     return; 
   }
   const trigger = getTrigger(newMsg.text);
@@ -411,6 +476,7 @@ async function handleEdit({ event, client }) {
 
   const parsed = parseAutoBlock(newMsg.text || '');
   const miss = missingFields(parsed);
+  const issues = typeIssues(parsed);
 
   const { permalink = '' } = await client.chat.getPermalink({
     channel,
@@ -419,6 +485,11 @@ async function handleEdit({ event, client }) {
 
   if (miss.length) {
     await replyMissing({ client, channel, ts: origTs, fields: miss, suffix });
+    return;
+  }
+
+  if (issues.length) {
+    await replyInvalid({ client, channel, ts: origTs, issues, suffix });
     return;
   }
   const { mention: reporterMention, notionId: reporterNotionId } = await resolveNotionPersonForSlackUser(newMsg.user, client);
@@ -556,6 +627,9 @@ function setProp(props, name, value) {
     case 'number':
       props[name] = { number: typeof value === 'number' ? value : Number(value) };
       break;
+    case 'email':
+      props[name] = { email: toStr(value) };
+      break;
     default:
       // Fallback to rich_text
       props[name] = { rich_text: [{ type: 'text', text: { content: toStr(value) } }] };
@@ -564,6 +638,6 @@ function setProp(props, name, value) {
 
 (async () => {
   try { await loadSchema(); } catch (e) { console.error('Notion schema error:', e.message); }
-  await app.start(process.env.PORT || 3000);
+  await app.start(process.env.PORT || 1987);
   console.log('⚡️ On-call auto ingestor running (Socket Mode)');
 })();

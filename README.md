@@ -13,7 +13,7 @@
 
 ## Overview
 
-**On-Call Bot** streamlines the process of handling on-call incidents in Slack by automatically parsing specially formatted messages (using the `@auto` syntax), validating key fields, and syncing updates directly into Notion.
+**Notion Cat** streamlines the process of handling on-call incidents in Slack by automatically parsing specially formatted messages (using the `@auto` syntax), validating key fields, and syncing updates directly into Notion.
 
 No more manual copy-pasting — just type `@auto` in Slack and let the bot take care of the rest.
 
@@ -58,6 +58,10 @@ Slack → @auto message → Bolt App → Notion API → Notion Page
 Store these in `.env` or a secret manager (Doppler, Vault, etc).
 
 ---
+
+### Invite the bot in your target channel
+
+`/invite @On-call Bot`
 
 ## 🚀 Running Locally
 
@@ -144,8 +148,11 @@ npm run lint
 You can deploy easily using Docker:
 
 ```sh
-docker build -t on-call-bot .  
-docker run -d --env-file .env on-call-bot
+docker compose build --no-cache
+docker compose up -d
+docker logs -f oncall-auto
+
+# Expect: "⚡️ On-call auto ingestor running (Socket Mode)"
 ```
 
 Or via Cloud Run / Fly.io / Railway.app.

@@ -26,7 +26,84 @@ const app = new App({
   logLevel: LogLevel.INFO
 });
 
+
 const notion = new Notion({ auth: NOTION_TOKEN });
+
+// --- Global resilience: swallow transient Socket Mode disconnects ---
+function isExplicitSocketDisconnect(err) {
+  const msg = String(err && err.message || '');
+  return msg.includes("Unhandled event 'server explicit disconnect'") || msg.includes('server explicit disconnect');
+}
+process.on('uncaughtException', (err) => {
+  if (isExplicitSocketDisconnect(err)) {
+    console.warn('[warn] Ignoring transient Slack Socket Mode explicit disconnect during connect; library will reconnect.');
+    return; // do not crash
+  }
+  console.error('[fatal] Uncaught exception:', err);
+  // You can choose to exit here; keep alive to let Docker restart via healthcheck if needed.
+});
+process.on('unhandledRejection', (reason) => {
+  const err = reason instanceof Error ? reason : new Error(String(reason));
+  if (isExplicitSocketDisconnect(err)) {
+    console.warn('[warn] Ignoring transient Slack Socket Mode explicit disconnect during connect (promise rejection).');
+    return;
+  }
+  console.error('[fatal] Unhandled rejection:', reason);
+});
+
+// --- Needed-by parser (US-friendly) ---
+function parseNeededByString(input) {
+  if (!input) return null;
+  const s = String(input).trim();
+
+  // 1) Try ISO or Date.parse-friendly first
+  const isoTry = new Date(s);
+  if (!isNaN(isoTry)) return isoTry;
+
+  // 2) Match "MM/DD/YYYY [time]" where time can be "7PM", "7 PM", "7:30 pm", "19:00"
+  const re = /^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})(?:\s+(\d{1,2})(?::(\d{2}))?\s*([AaPp][Mm])?)?$/;
+  const m = s.match(re);
+  if (m) {
+    let [, mm, dd, yyyy, hh, min, ampm] = m;
+    const year = yyyy.length === 2 ? 2000 + Number(yyyy) : Number(yyyy);
+    const monthIdx = Number(mm) - 1;
+    const day = Number(dd);
+    let hours = hh ? Number(hh) : 17;
+    const minutes = min ? Number(min) : (hh ? 0 : 0);
+
+    if (ampm) {
+      const ap = ampm.toLowerCase();
+      if (ap === 'pm' && hours < 12) hours += 12;
+      if (ap === 'am' && hours === 12) hours = 0;
+    }
+
+    const d = new Date(year, monthIdx, day, hours, minutes, 0, 0);
+    if (!isNaN(d)) return d;
+  }
+
+  // 3) Match "YYYY-MM-DD [time]"
+  const reIsoish = /^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2})(?::(\d{2}))?\s*([AaPp][Mm])?)?$/;
+  const m2 = s.match(reIsoish);
+  if (m2) {
+    let [, yyyy, mm, dd, hh, min, ampm] = m2;
+    const year = Number(yyyy);
+    const monthIdx = Number(mm) - 1;
+    const day = Number(dd);
+    let hours = hh ? Number(hh) : 17;
+    const minutes = min ? Number(min) : (hh ? 0 : 0);
+
+    if (ampm) {
+      const ap = ampm.toLowerCase();
+      if (ap === 'pm' && hours < 12) hours += 12;
+      if (ap === 'am' && hours === 12) hours = 0;
+    }
+
+    const d = new Date(year, monthIdx, day, hours, minutes, 0, 0);
+    if (!isNaN(d)) return d;
+  }
+
+  return null; // let caller decide a default
+}
 
 /* ----------------- Parsing + validation ----------------- */
 function parseAutoBlock(text = '') {
@@ -48,20 +125,36 @@ function parseAutoBlock(text = '') {
   const customer  = pick('Customer');
   const onepass   = pick('1\\s*Password');
   const neededRaw = pick('Needed\\s*by\\s*(?:date/?time)?');
+
+  function defaultNeeded() {
+    const d = new Date();
+    d.setDate(d.getDate() + 30);
+    d.setHours(17, 0, 0, 0); // default to 5pm
+    return d;
+  }
+
+  let needed = defaultNeeded();
+  if (neededRaw) {
+    const parsed = parseNeededByString(neededRaw);
+    needed = parsed && !isNaN(parsed) ? parsed : defaultNeeded();
+  }
   const links     = pick('Relevant\\s*Links?');
 
   const urls = Array.from(links.matchAll(/https?:\/\/\S+/g)).map(m => m[0]);
-
-  // Default “push out as far as possible”: 30 days at 5pm PT
-  const needed = neededRaw
-    ? new Date(neededRaw)
-    : (() => { const d = new Date(); d.setDate(d.getDate() + 30); d.setHours(17, 0, 0, 0); return d; })();
 
   return { priority, issue, replicate, customer, onepass, needed, urls, linksText: links };
 }
 
 const isTopLevel = (evt) => !(evt?.thread_ts && evt.thread_ts !== evt.ts);
-const startsWithAuto = (text) => /^\s*@auto\b/i.test(text || '');
+const getTrigger = (text) => {
+  const m = /^\s*@(auto|cat|peepo)\b/i.exec(text || '');
+  return m ? m[1].toLowerCase() : null;
+};
+const suffixForTrigger = (t) => {
+  if (t === 'cat') return ' 🐈';
+  if (t === 'peepo') return ' :peepo-yessir:';
+  return '';
+};
 
 function missingFields(parsed) {
   const missing = [];
@@ -76,7 +169,7 @@ function missingFields(parsed) {
 
 /* ----------------- Notion helpers ----------------- */
 // Create or update a page; always write Slack TS (if present) and permalink
-async function createOrUpdateNotionPage({ parsed, permalink, slackTs, pageId }) {
+async function createOrUpdateNotionPage({ parsed, permalink, slackTs, reporterMention, reporterNotionId, pageId }) {
   if (!SCHEMA) await loadSchema();
 
   const props = {};
@@ -86,6 +179,13 @@ async function createOrUpdateNotionPage({ parsed, permalink, slackTs, pageId }) 
   setProp(props, 'Customer', parsed.customer);
   setProp(props, '1Password', parsed.onepass);
   setProp(props, 'Needed by', parsed.needed);
+  // Reported by: if Notion column is People, set person by Notion user id; otherwise store mention text
+  const reportedMeta = SCHEMA.byName['reported by'];
+  if (reportedMeta && reportedMeta.type === 'people' && reporterNotionId) {
+    props[reportedMeta.name] = { people: [{ id: reporterNotionId }] };
+  } else if (reporterMention) {
+    setProp(props, 'Reported by', reporterMention);
+  }
 
   // Slack Message TS (preferred unique key)
   if (SCHEMA.slackTsProp) {
@@ -117,12 +217,17 @@ async function createOrUpdateNotionPage({ parsed, permalink, slackTs, pageId }) 
     }
   }
 
-  if (pageId) {
-    const upd = await notion.pages.update({ page_id: pageId, properties: props });
-    return { id: upd.id, url: upd.url };
-  } else {
-    const created = await notion.pages.create({ parent: { database_id: NOTION_DATABASE_ID }, properties: props });
-    return { id: created.id, url: created.url };
+  try {
+    if (pageId) {
+      const upd = await notion.pages.update({ page_id: pageId, properties: props });
+      return { id: upd.id, url: upd.url };
+    } else {
+      const created = await notion.pages.create({ parent: { database_id: NOTION_DATABASE_ID }, properties: props });
+      return { id: created.id, url: created.url };
+    }
+  } catch (err) {
+    // rethrow so caller can decide how to notify
+    throw err;
   }
 }
 
@@ -156,23 +261,54 @@ async function findPageForMessage({ slackTs, permalink }) {
 }
 
 /* ----------------- Slack responses ----------------- */
-async function replyMissing({ client, channel, ts, fields }) {
+async function replyMissing({ client, channel, ts, fields, suffix = '' }) {
   const lines = fields.map(f => `• ${f}`).join('\n');
   const text =
     `❗ I couldn't track this yet — the following fields are missing:\n${lines}\n\n` +
     `Please *edit the original message* to include the missing fields (keep the *@auto* line at the top). ` +
     `I'll pick up the edit automatically.`;
+  await client.chat.postMessage({ channel, thread_ts: ts, text: text + suffix });
+}
+
+async function replyCreated({ client, channel, ts, pageUrl, parsed, suffix = '' }) {
+  const dbPart = SCHEMA?.dbUrl ? `<${SCHEMA.dbUrl}|${SCHEMA.dbTitle || 'On-call Issue Tracker DB'}>` : 'Notion DB';
+  const pagePart = `<${pageUrl}|${parsed?.issue || 'Notion Page'}>`;
+  const text = `✅ Tracked: ${dbPart} › ${pagePart}` + suffix;
   await client.chat.postMessage({ channel, thread_ts: ts, text });
 }
 
-async function replyCreated({ client, channel, ts, url }) {
-  const text = `✅ Tracked in Notion: ${url}`;
+async function replyUpdated({ client, channel, ts, pageUrl, parsed, suffix = '' }) {
+  const dbPart = SCHEMA?.dbUrl ? `<${SCHEMA.dbUrl}|${SCHEMA.dbTitle || 'On-call Issue Tracker DB'}>` : 'Notion DB';
+  const pagePart = `<${pageUrl}|${parsed?.issue || 'Notion Page'}>`;
+  const text = `🔄 Updated: ${dbPart} › ${pagePart}` + suffix;
   await client.chat.postMessage({ channel, thread_ts: ts, text });
 }
 
-async function replyUpdated({ client, channel, ts, url }) {
-  const text = `🔄 Updated in Notion: ${url}`;
-  await client.chat.postMessage({ channel, thread_ts: ts, text });
+// --- Bolt error handler (middleware/runtime) ---
+app.error(async (error) => {
+  if (isExplicitSocketDisconnect(error)) {
+    console.warn('[warn] Bolt reported explicit Socket Mode disconnect; continuing.');
+    return;
+  }
+  console.error('[error] Bolt app error:', error);
+});
+
+// --- Notion permission error helpers ---
+function isNotionPermError(err) {
+  // Notion returns APIResponseError with code 'restricted_resource' and 403
+  return !!err && (err.code === 'restricted_resource' || err.status === 403);
+}
+
+async function notifyNotionPerms({ client, channel, ts, suffix = '' }) {
+  const dbPart = SCHEMA?.dbUrl ? `<${SCHEMA.dbUrl}|${SCHEMA.dbTitle || 'On-call Issue Tracker DB'}>` : 'the Notion database';
+  const text =
+    `❗ I couldn't write to Notion due to *insufficient permissions*.\n` +
+    `Please make sure your Notion integration is connected to ${dbPart} with *Can edit* access:\n` +
+    `- In Notion, open the database as a full page → *Share* → *Add connection* → select this integration → *Allow*.\n` +
+    `- Then try your message again (or edit the same message).` + suffix;
+  try {
+    await client.chat.postMessage({ channel, thread_ts: ts, text });
+  } catch (_) { /* ignore secondary errors */ }
 }
 
 /* ----------------- Event handlers ----------------- */
@@ -190,9 +326,9 @@ app.event('message', async ({ event, client }) => {
     }
 
     // Fresh message path
-    if (!startsWithAuto(event.text)) {
-      return;
-    }
+    const trigger = getTrigger(event.text);
+    if (!trigger) { return; }
+    const suffix = suffixForTrigger(trigger);
     if (!ALLOW_THREADS && !isTopLevel(event)) { 
       return; 
     }
@@ -206,21 +342,32 @@ app.event('message', async ({ event, client }) => {
     }).then(r => r || {});
 
     if (miss.length) {
-      await replyMissing({ client, channel: event.channel, ts: event.ts, fields: miss });
+      await replyMissing({ client, channel: event.channel, ts: event.ts, fields: miss, suffix });
       return;
     }
 
+    const { mention: reporterMention, notionId: reporterNotionId } = await resolveNotionPersonForSlackUser(event.user, client);
+
     // Use TS-based lookup to avoid duplicates, then upsert (write TS + permalink)
     const existing = await findPageForMessage({ slackTs: event.ts, permalink });
-    const { url } = await createOrUpdateNotionPage({
-      parsed,
-      permalink,
-      slackTs: event.ts,
-      pageId: existing?.id
-    });
-
-    await replyCreated({ client, channel: event.channel, ts: event.ts, url });
-} catch (err) {
+    try {
+      const { url } = await createOrUpdateNotionPage({
+        parsed,
+        permalink,
+        slackTs: event.ts,
+        reporterMention,
+        reporterNotionId,
+        pageId: existing?.id
+      });
+      await replyCreated({ client, channel: event.channel, ts: event.ts, pageUrl: url, parsed, suffix });
+    } catch (err) {
+      if (isNotionPermError(err)) {
+        await notifyNotionPerms({ client, channel: event.channel, ts: event.ts, suffix });
+        return;
+      }
+      throw err; // let outer handler log other errors
+    }
+  } catch (err) {
     console.error('message handler error:', err);
   }
 });
@@ -240,33 +387,45 @@ async function handleEdit({ event, client }) {
   if (!ALLOW_THREADS && newMsg.thread_ts && newMsg.thread_ts !== newMsg.ts) { 
     return; 
   }
-  if (!startsWithAuto(newMsg.text)) {
-    return;
+  const trigger = getTrigger(newMsg.text);
+  if (!trigger) { 
+    return; 
   }
+  const suffix = suffixForTrigger(trigger);
 
   const parsed = parseAutoBlock(newMsg.text || '');
   const miss = missingFields(parsed);
 
   const { permalink = '' } = await client.chat.getPermalink({
-  channel,
-  message_ts: origTs
+    channel,
+    message_ts: origTs
   }).then(r => r || {});
 
   if (miss.length) {
-    await replyMissing({ client, channel, ts: origTs, fields: miss });
+    await replyMissing({ client, channel, ts: origTs, fields: miss, suffix });
     return;
   }
+  const { mention: reporterMention, notionId: reporterNotionId } = await resolveNotionPersonForSlackUser(newMsg.user, client);
 
-// Find by Slack TS first (canonical key), fall back to permalink
-const existing = await findPageForMessage({ slackTs: origTs, permalink });
-const { url } = await createOrUpdateNotionPage({
-  parsed,
-  permalink,
-  slackTs: origTs,
-  pageId: existing?.id
-});
-
-await replyUpdated({ client, channel, ts: origTs, url });
+  // Find by Slack TS first (canonical key), fall back to permalink
+  const existing = await findPageForMessage({ slackTs: origTs, permalink });
+  try {
+    const { url } = await createOrUpdateNotionPage({
+      parsed,
+      permalink,
+      slackTs: origTs,
+      reporterMention,
+      reporterNotionId,
+      pageId: existing?.id
+    });
+    await replyUpdated({ client, channel, ts: origTs, pageUrl: url, parsed, suffix });
+  } catch (err) {
+    if (isNotionPermError(err)) {
+      await notifyNotionPerms({ client, channel, ts: origTs, suffix });
+      return;
+    }
+    throw err;
+  }
 }
 
 // --- Notion schema discovery ---
@@ -306,8 +465,41 @@ async function loadSchema() {
     );
   }
 
-  SCHEMA = { byName, slackUrlProp, slackTsProp };
+  const dbTitle = (db.title && db.title[0] && db.title[0].plain_text) ? db.title[0].plain_text : 'On-call Issue Tracker DB';
+  SCHEMA = { byName, slackUrlProp, slackTsProp, dbUrl: db.url, dbTitle };
   return SCHEMA;
+}
+
+// --- Slack -> Notion person resolver ---
+async function findNotionUserIdByEmail(email) {
+  if (!email) return null;
+  let cursor;
+  while (true) {
+    const res = await notion.users.list(cursor ? { start_cursor: cursor } : {});
+    for (const u of res.results || []) {
+      if (u.type === 'person' && u.person?.email && u.person.email.toLowerCase() === email.toLowerCase()) {
+        return u.id;
+      }
+    }
+    if (!res.has_more) break;
+    cursor = res.next_cursor;
+  }
+  return null;
+}
+
+async function resolveNotionPersonForSlackUser(slackUserId, client) {
+  try {
+    if (!slackUserId) return { mention: '', notionId: null };
+    const info = await client.users.info({ user: slackUserId });
+    const email = info?.user?.profile?.email || null;
+    const mention = `<@${slackUserId}>`;
+    if (!email) return { mention, notionId: null }; // requires users:read.email; fallback to mention text
+    const notionId = await findNotionUserIdByEmail(email);
+    return { mention, notionId };
+  } catch (_) {
+    // On any failure, return mention only
+    return { mention: slackUserId ? `<@${slackUserId}>` : '', notionId: null };
+  }
 }
 
 // Helper to set a property respecting its actual type
@@ -328,9 +520,20 @@ function setProp(props, name, value) {
     case 'select':
       props[name] = { select: { name: toStr(value) } };
       break;
-    case 'date':
-      props[name] = { date: { start: value instanceof Date ? value.toISOString() : new Date(value).toISOString() } };
+    case 'date': {
+      let dt = null;
+      if (value instanceof Date && !isNaN(value)) {
+        dt = value;
+      } else if (typeof value === 'string') {
+        dt = parseNeededByString(value);
+        if (!dt || isNaN(dt)) dt = new Date(value);
+      }
+      if (dt && !isNaN(dt)) {
+        props[name] = { date: { start: dt.toISOString() } };
+      }
+      // If parsing failed, skip setting this property to avoid crashes.
       break;
+    }
     case 'url':
       props[name] = { url: toStr(value) };
       break;

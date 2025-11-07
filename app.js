@@ -950,6 +950,36 @@ function setProp(props, name, value) {
   }
 }
 
+/**
+ * Gracefully shuts down the application
+ * Stops the Bolt app and cleans up resources
+ * @param {string} signal - The signal that triggered shutdown (SIGTERM, SIGINT, etc.)
+ * @returns {Promise<void>}
+ */
+async function gracefulShutdown(signal) {
+  logger.info({ signal }, 'Received shutdown signal, starting graceful shutdown');
+  
+  try {
+    // Stop accepting new events from Slack
+    await app.stop();
+    logger.info('Slack Bolt app stopped successfully');
+    
+    // Give any in-flight requests a moment to complete
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    logger.info({ signal }, 'Graceful shutdown completed');
+    process.exit(0);
+  } catch (err) {
+    logger.error({ error: err.message, signal }, 'Error during graceful shutdown');
+    process.exit(1);
+  }
+}
+
+// Register shutdown handlers
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Startup
 (async () => {
   try { 
     await loadSchema();

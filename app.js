@@ -14,7 +14,7 @@ import pTimeout from 'p-timeout';
 import http from 'http';
 
 // Import local modules
-import { getConfig } from './lib/config.js';
+import { getConfig, getDatabaseIdForChannel } from './lib/config.js';
 import { NOTION_FIELDS, DEFAULTS, API_TIMEOUT, setDefaults, setApiTimeout } from './lib/constants.js';
 import { parseAutoBlock, parseNeededByString, normalizeEmail, stripRichTextFormatting } from './lib/parser.js';
 import { missingFields, typeIssues, isTopLevel, getTrigger, suffixForTrigger } from './lib/validation.js';
@@ -160,8 +160,8 @@ process.on('unhandledRejection', (reason) => {
  * @returns {Promise<Object>} Object with id and url of the created/updated Notion page
  * @throws {Error} Throws if Notion API call fails (including permission errors)
  */
-async function createOrUpdateNotionPage({ parsed, permalink, slackTs, reporterMention, reporterNotionId, pageId }) {
-  const schema = await getSchema();
+async function createOrUpdateNotionPage({ parsed, permalink, slackTs, reporterMention, reporterNotionId, pageId, databaseId }) {
+  const schema = await getSchema(databaseId);
 
   const props = {};
   setProp(props, NOTION_FIELDS.ISSUE, parsed.issue || '(no issue given)', schema);
@@ -230,7 +230,7 @@ async function createOrUpdateNotionPage({ parsed, permalink, slackTs, reporterMe
       const upd = await notionThrottled.pages.update({ page_id: pageId, properties: props });
       return { id: upd.id, url: upd.url };
     } else {
-      const created = await notionThrottled.pages.create({ parent: { database_id: config.notion.databaseId }, properties: props });
+      const created = await notionThrottled.pages.create({ parent: { database_id: databaseId }, properties: props });
       return { id: created.id, url: created.url };
     }
   } catch (err) {
@@ -247,8 +247,8 @@ async function createOrUpdateNotionPage({ parsed, permalink, slackTs, reporterMe
  * @param {string} params.permalink - Slack message permalink URL
  * @returns {Promise<Object|null>} Notion page object if found, null otherwise
  */
-async function findPageForMessage({ slackTs, permalink }) {
-  const schema = await getSchema();
+async function findPageForMessage({ slackTs, permalink, databaseId }) {
+  const schema = await getSchema(databaseId);
 
   // 1) Try by TS (exact)
   if (schema.slackTsProp) {
@@ -259,7 +259,7 @@ async function findPageForMessage({ slackTs, permalink }) {
     } else {
       tsFilter = { property: schema.slackTsProp.name, rich_text: { equals: String(slackTs) } };
     }
-    const byTs = await notionThrottled.databases.query({ database_id: config.notion.databaseId, filter: tsFilter, page_size: 1 });
+    const byTs = await notionThrottled.databases.query({ database_id: databaseId, filter: tsFilter, page_size: 1 });
     if (byTs.results?.[0]) {return byTs.results[0];}
   }
 
@@ -268,7 +268,7 @@ async function findPageForMessage({ slackTs, permalink }) {
     const urlFilter = schema.slackUrlProp.type === 'url'
       ? { property: schema.slackUrlProp.name, url: { equals: permalink } }
       : { property: schema.slackUrlProp.name, rich_text: { contains: permalink } };
-    const byUrl = await notionThrottled.databases.query({ database_id: config.notion.databaseId, filter: urlFilter, page_size: 1 });
+    const byUrl = await notionThrottled.databases.query({ database_id: databaseId, filter: urlFilter, page_size: 1 });
     if (byUrl.results?.[0]) {return byUrl.results[0];}
   }
 
@@ -332,7 +332,7 @@ async function replyInvalid({ client, channel, ts, issues, suffix = '' }) {
 }
 
 /**
- * Posts a success message when a Notion page is created
+ * Posts a success message when a new Notion page is created
  * @param {Object} params - Function parameters
  * @param {Object} params.client - Slack Web API client
  * @param {string} params.channel - Slack channel ID
@@ -340,10 +340,11 @@ async function replyInvalid({ client, channel, ts, issues, suffix = '' }) {
  * @param {string} params.pageUrl - URL of the created Notion page
  * @param {Object} params.parsed - Parsed message data (for issue title)
  * @param {string} [params.suffix=''] - Optional emoji suffix to append
+ * @param {string} params.databaseId - Notion database ID (for schema lookup)
  * @returns {Promise<void>}
  */
-async function replyCreated({ client, channel, ts, pageUrl, parsed, suffix = '' }) {
-  const schema = schemaCache.getCurrent();
+async function replyCreated({ client, channel, ts, pageUrl, parsed, suffix = '', databaseId }) {
+  const schema = getSchemaCache(databaseId).getCurrent();
   const dbPart = schema?.dbUrl ? `<${schema.dbUrl}|${schema.dbTitle || DEFAULTS.DB_TITLE}>` : 'Notion DB';
   const pagePart = `<${pageUrl}|${parsed?.issue || 'Notion Page'}>`;
   const text = `✅ Tracked: ${dbPart} › ${pagePart}` + suffix;
@@ -359,10 +360,11 @@ async function replyCreated({ client, channel, ts, pageUrl, parsed, suffix = '' 
  * @param {string} params.pageUrl - URL of the updated Notion page
  * @param {Object} params.parsed - Parsed message data (for issue title)
  * @param {string} [params.suffix=''] - Optional emoji suffix to append
+ * @param {string} params.databaseId - Notion database ID (for schema lookup)
  * @returns {Promise<void>}
  */
-async function replyUpdated({ client, channel, ts, pageUrl, parsed, suffix = '' }) {
-  const schema = schemaCache.getCurrent();
+async function replyUpdated({ client, channel, ts, pageUrl, parsed, suffix = '', databaseId }) {
+  const schema = getSchemaCache(databaseId).getCurrent();
   const dbPart = schema?.dbUrl ? `<${schema.dbUrl}|${schema.dbTitle || DEFAULTS.DB_TITLE}>` : 'Notion DB';
   const pagePart = `<${pageUrl}|${parsed?.issue || 'Notion Page'}>`;
   const text = `🔄 Updated: ${dbPart} › ${pagePart}` + suffix;
@@ -395,10 +397,11 @@ function isNotionPermError(err) {
  * @param {string} params.channel - Slack channel ID
  * @param {string} params.ts - Message timestamp (for threading)
  * @param {string} [params.suffix=''] - Optional emoji suffix to append
+ * @param {string} params.databaseId - Notion database ID (for schema lookup)
  * @returns {Promise<void>}
  */
-async function notifyNotionPerms({ client, channel, ts, suffix = '' }) {
-  const schema = schemaCache.getCurrent();
+async function notifyNotionPerms({ client, channel, ts, suffix = '', databaseId }) {
+  const schema = getSchemaCache(databaseId).getCurrent();
   const dbPart = schema?.dbUrl ? `<${schema.dbUrl}|${schema.dbTitle || DEFAULTS.DB_TITLE}>` : 'the Notion database';
   const text =
     `❗ I couldn't write to Notion due to *insufficient permissions*.\n` +
@@ -428,11 +431,14 @@ app.event('message', async ({ event, client }) => {
     
     // Ignore non-user-generated subtypes except edits (handled below)
     if (event.subtype && event.subtype !== 'message_changed') {return;}
-    if (config.slack.watchChannelId && event.channel !== config.slack.watchChannelId) {return;}
+    
+    // Check if this channel is monitored and get its database ID
+    const databaseId = getDatabaseIdForChannel(event.channel);
+    if (!databaseId) {return;} // Channel not monitored
 
     // Handle edits (message_changed) separately
     if (event.subtype === 'message_changed') {
-      await handleEdit({ event, client });
+      await handleEdit({ event, client, databaseId });
       return;
     }
 
@@ -482,7 +488,7 @@ app.event('message', async ({ event, client }) => {
     const { mention: reporterMention, notionId: reporterNotionId } = await resolveNotionPersonForSlackUser(event.user, client);
 
     // Use TS-based lookup to avoid duplicates, then upsert (write TS + permalink)
-    const existing = await findPageForMessage({ slackTs: event.ts, permalink });
+    const existing = await findPageForMessage({ slackTs: event.ts, permalink, databaseId });
     const isUpdate = !!existing;
     
     try {
@@ -492,7 +498,8 @@ app.event('message', async ({ event, client }) => {
         slackTs: event.ts,
         reporterMention,
         reporterNotionId,
-        pageId: existing?.id
+        pageId: existing?.id,
+        databaseId
       });
       
       const processingTime = Date.now() - startTime;
@@ -512,10 +519,10 @@ app.event('message', async ({ event, client }) => {
         }, 'Notion page created');
       }
       
-      await replyCreated({ client, channel: event.channel, ts: event.ts, pageUrl: url, parsed, suffix });
+      await replyCreated({ client, channel: event.channel, ts: event.ts, pageUrl: url, parsed, suffix, databaseId });
     } catch (err) {
       if (isNotionPermError(err)) {
-        await notifyNotionPerms({ client, channel: event.channel, ts: event.ts, suffix });
+        await notifyNotionPerms({ client, channel: event.channel, ts: event.ts, suffix, databaseId });
         return;
       }
       if (err.name === 'TimeoutError') {
@@ -554,9 +561,10 @@ app.event('message', async ({ event, client }) => {
  * @param {Object} params - Function parameters
  * @param {Object} params.event - Slack message_changed event
  * @param {Object} params.client - Slack Web API client
+ * @param {string} params.databaseId - Notion database ID for this channel
  * @returns {Promise<void>}
  */
-async function handleEdit({ event, client }) {
+async function handleEdit({ event, client, databaseId }) {
   const startTime = Date.now();
   // Slack edit payload:
   // event.message.text = new text
@@ -614,7 +622,7 @@ async function handleEdit({ event, client }) {
   const { mention: reporterMention, notionId: reporterNotionId } = await resolveNotionPersonForSlackUser(newMsg.user, client);
 
   // Find by Slack TS first (canonical key), fall back to permalink
-  const existing = await findPageForMessage({ slackTs: origTs, permalink });
+  const existing = await findPageForMessage({ slackTs: origTs, permalink, databaseId });
   try {
     const { url } = await createOrUpdateNotionPage({
       parsed,
@@ -622,7 +630,8 @@ async function handleEdit({ event, client }) {
       slackTs: origTs,
       reporterMention,
       reporterNotionId,
-      pageId: existing?.id
+      pageId: existing?.id,
+      databaseId
     });
     
     const processingTime = Date.now() - startTime;
@@ -634,10 +643,10 @@ async function handleEdit({ event, client }) {
       metricsUpdated: metrics.get('messagesUpdated')
     }, 'Notion page updated from edit');
     
-    await replyUpdated({ client, channel, ts: origTs, pageUrl: url, parsed, suffix });
+    await replyUpdated({ client, channel, ts: origTs, pageUrl: url, parsed, suffix, databaseId });
   } catch (err) {
     if (isNotionPermError(err)) {
-      await notifyNotionPerms({ client, channel, ts: origTs, suffix });
+      await notifyNotionPerms({ client, channel, ts: origTs, suffix, databaseId });
       return;
     }
     if (err.name === 'TimeoutError') {
@@ -663,23 +672,36 @@ async function handleEdit({ event, client }) {
 
 /** 
  * Cached Notion database schema information
- * @type {Object|null}
+ * Map of database ID to schema cache
+ * @type {Map<string, NotionSchemaCache>}
  */
-// Initialize Notion schema cache
+const schemaCaches = new Map();
 const SCHEMA_CACHE_TTL = parseInt(process.env.SCHEMA_CACHE_TTL || '3600000', 10);
-const schemaCache = new NotionSchemaCache({ 
-  ttl: SCHEMA_CACHE_TTL, 
-  logger 
-});
 
 /**
- * Loads the Notion database schema
+ * Gets or creates a schema cache for a specific database
+ * @param {string} databaseId - Notion database ID
+ * @returns {NotionSchemaCache} Schema cache instance for the database
+ */
+function getSchemaCache(databaseId) {
+  if (!schemaCaches.has(databaseId)) {
+    schemaCaches.set(databaseId, new NotionSchemaCache({ 
+      ttl: SCHEMA_CACHE_TTL, 
+      logger 
+    }));
+  }
+  return schemaCaches.get(databaseId);
+}
+
+/**
+ * Loads the Notion database schema for a specific database
  * Discovers property types and identifies Slack message tracking columns
+ * @param {string} databaseId - Notion database ID
  * @returns {Promise<Object>} Schema object with property mappings and database metadata
  * @throws {Error} If required tracking columns (Slack Message URL or Slack Message TS) are not found
  */
-async function loadSchemaFromNotion() {
-  const db = await notionThrottled.databases.retrieve({ database_id: config.notion.databaseId });
+async function loadSchemaFromNotion(databaseId) {
+  const db = await notionThrottled.databases.retrieve({ database_id: databaseId });
   const byName = {};
   for (const [name, def] of Object.entries(db.properties || {})) {
     byName[name.toLowerCase()] = { id: def.id, name, type: def.type, options: def.select?.options || [] };
@@ -717,19 +739,21 @@ async function loadSchemaFromNotion() {
 }
 
 /**
- * Gets the current schema, loading or refreshing if necessary
+ * Gets the current schema for a database, loading or refreshing if necessary
  * Uses NotionSchemaCache for automatic TTL-based refresh
+ * @param {string} databaseId - Notion database ID
  * @returns {Promise<Object>} Current schema object
  */
-async function getSchema() {
+async function getSchema(databaseId) {
+  const cache = getSchemaCache(databaseId);
   try {
-    return await schemaCache.get(() => loadSchemaFromNotion());
+    return await cache.get(() => loadSchemaFromNotion(databaseId));
   } catch (err) {
-    logger.error({ error: err.message }, 'Failed to load schema');
+    logger.error({ error: err.message, databaseId }, 'Failed to load schema');
     // If we have a cached version (even if expired), return it
-    const cached = schemaCache.getCurrent();
+    const cached = cache.getCurrent();
     if (cached) {
-      logger.warn('Using stale cached schema due to load failure');
+      logger.warn({ databaseId }, 'Using stale cached schema due to load failure');
       return cached;
     }
     throw err;
@@ -935,11 +959,26 @@ const healthServer = http.createServer((req, res) => {
 
 // Startup
 (async () => {
-  try { 
-    await getSchema();
-    logger.info({ databaseId: config.notion.databaseId }, 'Notion schema loaded successfully');
-  } catch (e) { 
-    logger.error({ error: e.message, databaseId: config.notion.databaseId }, 'Failed to load Notion schema');
+  // Load schemas for all configured databases
+  const channelMappings = config.notion.channelMappings || [];
+  if (channelMappings.length === 0) {
+    logger.warn('No channel-to-database mappings configured. Bot will not monitor any channels.');
+  }
+  
+  for (const mapping of channelMappings) {
+    try { 
+      await getSchema(mapping.databaseId);
+      logger.info({ 
+        databaseId: mapping.databaseId, 
+        channelId: mapping.channelId 
+      }, 'Notion schema loaded successfully');
+    } catch (e) { 
+      logger.error({ 
+        error: e.message, 
+        databaseId: mapping.databaseId,
+        channelId: mapping.channelId
+      }, 'Failed to load Notion schema');
+    }
   }
   
   await app.start(config.server.port);

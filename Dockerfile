@@ -14,6 +14,7 @@ RUN npm ci --omit=dev
 # Copy the app and lib modules
 COPY app.js ./
 COPY lib ./lib
+COPY channel-mappings.json ./
 
 # (optional) expose a health port only if you added a health endpoint
 # EXPOSE 1987

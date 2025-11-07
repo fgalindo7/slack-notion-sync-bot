@@ -1,0 +1,28 @@
+{
+  "databases": [
+    {
+      "databaseId": "2a3f16c5ee36804fb308dc6c9d14f631",
+      "description": "On-Call Issue Tracker - Main",
+      "channels": [
+        {
+          "channelId": "C07NEEWKMBR",
+          "description": "#eng-pmo-lobby"
+        },
+        {
+          "channelId": "C09R54RDF35",
+          "description": "#on-call-bot-test"
+        }
+      ]
+    },
+    {
+      "databaseId": "abc123xyz456def789",
+      "description": "Secondary Issue Tracker",
+      "channels": [
+        {
+          "channelId": "C08ABCDEF12",
+          "description": "#support-team"
+        }
+      ]
+    }
+  ]
+}

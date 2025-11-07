@@ -22,6 +22,9 @@ No more manual copy-pasting — just type `@auto` in Slack and let the bot take 
 ## Features
 
 - **Smart message parsing:** Extracts structured data like priority, issue, customer, replication steps, etc.
+- **Rich text handling:** Automatically strips Slack formatting (bold, italic) from field values while preserving email links.
+- **ASAP date support:** Use "ASAP" as a shorthand for "20 minutes from now" in date fields.
+- **Multi-channel support:** Monitor multiple Slack channels, each routing to different Notion databases (or many-to-one).
 - **Notion integration:** Automatically creates or updates corresponding pages in your Notion database.
 - **Message edit support:** Edit your Slack message and the corresponding Notion page updates automatically.
 - **Thread awareness:** Responds only to top-level messages (or optionally to threads).
@@ -68,6 +71,68 @@ Success/Error Response to Slack Thread
 
 ## Configuration
 
+### Channel Monitoring Modes
+
+On-Call Cat supports two modes for monitoring Slack channels:
+
+#### **Single-Channel Mode (Default)**
+
+Monitor one Slack channel and write to one Notion database.
+
+```env
+CHANNEL_DB_MAPPINGS=false
+WATCH_CHANNEL_ID=C1234567890
+NOTION_DATABASE_ID=abc123def456ghi789
+```
+
+#### **Multi-Channel Mode**
+
+Monitor multiple Slack channels, each routing to potentially different Notion databases. This mode reads configuration from a `channel-mappings.json` file.
+
+```env
+CHANNEL_DB_MAPPINGS=true
+# Optional: Custom path (defaults to ./channel-mappings.json)
+CHANNEL_DB_MAPPINGS_FILE=/path/to/mappings.json
+```
+
+**channel-mappings.json format:**
+
+```json
+{
+  "databases": [
+    {
+      "databaseId": "abc123def456ghi789",
+      "description": "On-Call Issue Tracker - Main",
+      "channels": [
+        {
+          "channelId": "C1234567890",
+          "description": "#eng-pmo-lobby"
+        },
+        {
+          "channelId": "C0987654321",
+          "description": "#on-call-bot-test"
+        }
+      ]
+    },
+    {
+      "databaseId": "xyz789uvw456rst123",
+      "description": "Secondary Issue Tracker",
+      "channels": [
+        {
+          "channelId": "C5555555555",
+          "description": "#support-team"
+        }
+      ]
+    }
+  ]
+}
+```
+
+This configuration allows:
+- **One database → Many channels** (multiple channels write to the same database)
+- **Many databases** (different channels route to different databases)
+- **Self-documenting** with optional description fields for clarity
+
 ### Notion Database Requirements
 
 Your Notion database must include at least one of these properties for message tracking:
@@ -85,12 +150,15 @@ The bot will auto-detect these columns by name. If neither exists, message updat
 | SLACK_APP_LEVEL_TOKEN | App-level token for Socket Mode | ✅ Yes |
 | SLACK_SIGNING_SECRET | Slack signing secret (optional if using Socket Mode only) | ⚠️ Optional |
 | NOTION_TOKEN | Notion API integration token | ✅ Yes |
-| NOTION_DATABASE_ID | Target Notion database ID | ✅ Yes |
-| WATCH_CHANNEL_ID | Slack channel ID to monitor | ✅ Yes |
+| CHANNEL_DB_MAPPINGS | Enable multi-channel mode (true/false, default: false) | ⚠️ Optional |
+| CHANNEL_DB_MAPPINGS_FILE | Path to channel mappings JSON (default: ./channel-mappings.json) | ⚠️ Optional |
+| WATCH_CHANNEL_ID | Slack channel ID to monitor (single-channel mode only) | ✅ Yes (single-channel) |
+| NOTION_DATABASE_ID | Target Notion database ID (single-channel mode only) | ✅ Yes (single-channel) |
 | ALLOW_THREADS | Allow parsing inside threads (true/false, default: false) | ⚠️ Optional |
-| NOTION_TIMEOUT | Timeout for Notion API calls in ms (default: 10000) | ⚠️ Optional |
+| API_TIMEOUT | Timeout for API calls in ms (default: 10000) | ⚠️ Optional |
 | SCHEMA_CACHE_TTL | Schema cache TTL in ms (default: 3600000 = 1 hour) | ⚠️ Optional |
-| HEALTH_CHECK_PORT | Port for health check server (default: 3001) | ⚠️ Optional |
+| HEALTH_PORT | Port for health check server (default: 3000) | ⚠️ Optional |
+| PORT | Port for main app (default: 1987) | ⚠️ Optional |
 | LOG_LEVEL | Logging level: trace, debug, info, warn, error (default: info) | ⚠️ Optional |
 
 Store these in `.env` or a secret manager (Doppler, Vault, etc).
@@ -111,6 +179,8 @@ npm install
 
 ### Step 2: Create `.env`
 
+**Single-channel mode:**
+
 ```sh
 # Required
 SLACK_BOT_TOKEN=xoxb-...
@@ -118,14 +188,35 @@ SLACK_APP_LEVEL_TOKEN=xapp-...
 NOTION_TOKEN=secret_...
 NOTION_DATABASE_ID=abc123def456
 WATCH_CHANNEL_ID=C123456789
+CHANNEL_DB_MAPPINGS=false
 
 # Optional
 ALLOW_THREADS=false
-NOTION_TIMEOUT=10000
+API_TIMEOUT=10000
 SCHEMA_CACHE_TTL=3600000
-HEALTH_CHECK_PORT=3001
+HEALTH_PORT=3000
 LOG_LEVEL=info
 ```
+
+**Multi-channel mode:**
+
+```sh
+# Required
+SLACK_BOT_TOKEN=xoxb-...
+SLACK_APP_LEVEL_TOKEN=xapp-...
+NOTION_TOKEN=secret_...
+CHANNEL_DB_MAPPINGS=true
+
+# Optional
+CHANNEL_DB_MAPPINGS_FILE=./channel-mappings.json
+ALLOW_THREADS=false
+API_TIMEOUT=10000
+SCHEMA_CACHE_TTL=3600000
+HEALTH_PORT=3000
+LOG_LEVEL=info
+```
+
+Then create `channel-mappings.json` (see Configuration section above for format).
 
 ### Step 3: Start the app
 
@@ -148,10 +239,15 @@ Priority: P1
 Issue: Production API timeout on checkout  
 How to replicate: Attempt to purchase via /checkout  
 Customer: Acme Corp  
-1Password: acme-prod-api  
-Needed by: 2025-11-07 17:00 PT  
+1Password: support+k1893@acme.com
+Needed by: ASAP
 Relevant Links: <https://status.acme.io>, <https://notion.so/acme-api>
 ```
+
+**Notes:**
+- **Email formatting:** The bot automatically handles Slack's email formatting (e.g., `*<mailto:user@domain.com|user@domain.com>*`)
+- **ASAP dates:** Use `ASAP` for urgent issues - it sets "Needed by" to 20 minutes from now
+- **Rich text:** Bold (`*text*`) and italic (`_text_`) formatting is automatically stripped from all fields except "Reported by (text)"
 
 **Updating an incident:** Simply edit your original message - the bot will detect the change and update the corresponding Notion page automatically!
 
@@ -166,8 +262,13 @@ Relevant Links: <https://status.acme.io>, <https://notion.so/acme-api>
 | **BotMetrics** | Tracks success/failure metrics with encapsulated state | `lib/metrics.js` |
 | **NotionSchemaCache** | Caches Notion DB schema with TTL-based auto-refresh | `lib/schema-cache.js` |
 | **parseAutoBlock()** | Extracts key-value pairs from Slack messages | `lib/parser.js` |
+| **normalizeEmail()** | Strips Slack formatting from emails (handles `*<mailto:...>*`) | `lib/parser.js` |
+| **stripRichTextFormatting()** | Removes bold/italic markers while preserving URLs | `lib/parser.js` |
+| **parseNeededByString()** | Parses dates including "ASAP" (20 min from now) | `lib/parser.js` |
 | **missingFields()** | Validates that all required data is present | `lib/validation.js` |
-| **typeIssues()** | Validates field types (dates, priorities, etc.) | `lib/validation.js` |
+| **typeIssues()** | Validates field types (dates, priorities, emails, etc.) | `lib/validation.js` |
+| **loadChannelMappingsFromFile()** | Loads multi-channel configuration from JSON | `lib/config.js` |
+| **getDatabaseIdForChannel()** | Routes channel messages to appropriate Notion database | `lib/config.js` |
 | **createOrUpdateNotionPage()** | Creates or updates Notion pages dynamically | `app.js` |
 | **findPageForMessage()** | Finds existing pages by Slack TS (ensures idempotent updates) | `app.js` |
 | **getSchema()** | Retrieves cached Notion DB schema, auto-refreshes when expired | `app.js` |
@@ -186,6 +287,7 @@ The codebase follows a hybrid functional/OO approach:
 
 - **Slack Bolt JS** (v3.18.0) - Slack app framework with Socket Mode
 - **Notion SDK** (v2.2.15) - Official Notion API client
+- **Validator** (v13.12.0) - RFC-compliant email validation
 - **Node.js 20** - Alpine-based Docker image
 - **Pino** - High-performance structured JSON logging
 - **p-throttle** - Rate limiting (3 req/s to Notion API)
@@ -223,7 +325,7 @@ The bot exposes two HTTP endpoints for monitoring:
 ### Health Check Endpoint
 
 ```sh
-curl http://localhost:3001/health
+curl http://localhost:3000/health
 ```
 
 **Response (healthy):**
@@ -251,7 +353,7 @@ curl http://localhost:3001/health
 ### Metrics Endpoint
 
 ```sh
-curl http://localhost:3001/metrics
+curl http://localhost:3000/metrics
 ```
 
 Returns detailed metrics in JSON format with success rates and uptime.
@@ -278,22 +380,24 @@ Or via Cloud Run / Fly.io / Railway.app.
 
 ```
 on-call-cat/
-├── app.js                    # Main application entry point
-├── package.json              # Dependencies and scripts
-├── Dockerfile                # Container image definition
-├── docker-compose.yml        # Docker Compose configuration
-├── manifest.json             # Slack app manifest
-├── lib/                      # Modular components
-│   ├── config.js            # Centralized configuration
-│   ├── constants.js         # App-wide constants (defaults, regexes)
-│   ├── metrics.js           # BotMetrics class for tracking
-│   ├── parser.js            # Message parsing utilities
-│   ├── schema-cache.js      # NotionSchemaCache class with TTL
-│   └── validation.js        # Field validation functions
-├── logo/                     # Brand assets
-│   ├── on-call-cat.png      # Main logo
-│   └── on-call-cat-2.png    # Small logo variant
-└── README.md                 # This file
+├── app.js                        # Main application entry point
+├── package.json                  # Dependencies and scripts
+├── Dockerfile                    # Container image definition
+├── docker-compose.yml            # Docker Compose configuration
+├── manifest.json                 # Slack app manifest
+├── channel-mappings.json.example # Example multi-channel config
+├── lib/                          # Modular components
+│   ├── config.js                # Centralized configuration & multi-channel routing
+│   ├── constants.js             # App-wide constants (defaults, regexes)
+│   ├── metrics.js               # BotMetrics class for tracking
+│   ├── parser.js                # Message parsing, email normalization, date parsing
+│   ├── parser.test.js           # Unit tests for parser functions
+│   ├── schema-cache.js          # NotionSchemaCache class with TTL
+│   └── validation.js            # Field validation functions
+├── logo/                         # Brand assets
+│   ├── on-call-cat.png          # Main logo
+│   └── on-call-cat-2.png        # Small logo variant
+└── README.md                     # This file
 ```
 
 ---
@@ -313,12 +417,13 @@ on-call-cat/
 - Grant **Can edit** access
 
 **"Request timed out" errors**
-- Default timeout is 10 seconds - increase with `NOTION_TIMEOUT=15000`
+- Default timeout is 10 seconds - increase with `API_TIMEOUT=15000`
 - Check your network connection to Notion API
 - Verify Notion API status at status.notion.so
 
 **Bot doesn't respond to messages**
-- Verify `WATCH_CHANNEL_ID` matches the channel where you're posting
+- In single-channel mode: Verify `WATCH_CHANNEL_ID` matches the channel
+- In multi-channel mode: Check `channel-mappings.json` includes the channel
 - Invite the bot to the channel: `/invite @On-Call Cat`
 - Check bot has `channels:history` and `channels:read` scopes
 - Ensure Socket Mode is enabled in Slack app settings
@@ -331,7 +436,13 @@ on-call-cat/
 **High validation error rate**
 - Check the example message format matches your Notion schema
 - Required fields are case-insensitive but must match property names
-- Date formats should be ISO-8601 or natural language (e.g., "2025-11-07 17:00 PT")
+- Date formats: ISO-8601, natural language (e.g., "2025-11-07 17:00 PT"), or "ASAP"
+- Emails: RFC-compliant format, supports +, -, numbers, and dots
+
+**Email validation failing**
+- Bot handles Slack's email formatting automatically (e.g., `*<mailto:user@domain.com|user@domain.com>*`)
+- Supports complex emails like `support+k1893@domain.com`
+- Check that the email follows RFC 5322 format
 
 ---
 

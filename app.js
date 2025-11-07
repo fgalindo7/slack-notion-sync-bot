@@ -14,22 +14,30 @@ import pTimeout from 'p-timeout';
 import http from 'http';
 
 // Import local modules
-import { NOTION_FIELDS, DEFAULTS, API_TIMEOUT } from './lib/constants.js';
+import { getConfig } from './lib/config.js';
+import { NOTION_FIELDS, DEFAULTS, API_TIMEOUT, setDefaults, setApiTimeout } from './lib/constants.js';
 import { parseAutoBlock, parseNeededByString, normalizeEmail } from './lib/parser.js';
 import { missingFields, typeIssues, isTopLevel, getTrigger, suffixForTrigger } from './lib/validation.js';
 
+// Load and validate configuration
+const config = getConfig();
+
+// Apply configuration to constants
+setDefaults(config.defaults);
+setApiTimeout(config.api.timeout);
+
 // Initialize structured logger
 const logger = pino({
-  level: process.env.LOG_LEVEL || 'info',
-  transport: process.env.NODE_ENV !== 'production' ? {
+  level: config.logging.level,
+  transport: config.logging.pretty ? {
     target: 'pino-pretty',
     options: { colorize: true }
   } : undefined
 });
 
-// Rate limiter for Notion API (3 requests per second as per Notion limits)
+// Rate limiter for Notion API
 const throttle = pThrottle({
-  limit: 3,
+  limit: config.api.rateLimitPerSecond,
   interval: 1000, // 1 second
   strict: true
 });
@@ -37,48 +45,16 @@ const throttle = pThrottle({
 /**
  * Wraps a promise with a timeout to prevent hanging operations
  * @param {Promise} promise - The promise to wrap
- * @param {number} [ms=API_TIMEOUT] - Timeout in milliseconds
+ * @param {number} [ms] - Timeout in milliseconds (defaults to config value)
  * @param {string} [operation='Operation'] - Description of the operation for error messages
  * @returns {Promise} Promise that rejects if timeout is exceeded
  */
-const withTimeout = (promise, ms = API_TIMEOUT, operation = 'Operation') => {
+const withTimeout = (promise, ms = config.api.timeout, operation = 'Operation') => {
   return pTimeout(promise, {
     milliseconds: ms,
     message: `${operation} timed out after ${ms}ms`
   });
 };
-
-const {
-  SLACK_BOT_TOKEN,
-  SLACK_APP_LEVEL_TOKEN,
-  SLACK_SIGNING_SECRET,
-  NOTION_TOKEN,
-  NOTION_DATABASE_ID,
-  WATCH_CHANNEL_ID,
-  ALLOW_THREADS
-} = process.env;
-
-const ALLOW_THREADS_BOOL = String(ALLOW_THREADS || '').toLowerCase() === 'true';
-
-// Validate default values
-if (DEFAULTS.NEEDED_BY_DAYS < 1 || DEFAULTS.NEEDED_BY_DAYS > 365) {
-  logger.warn({ value: DEFAULTS.NEEDED_BY_DAYS }, 'DEFAULT_NEEDED_BY_DAYS out of range (1-365), using 30');
-  DEFAULTS.NEEDED_BY_DAYS = 30;
-}
-if (DEFAULTS.NEEDED_BY_HOUR < 0 || DEFAULTS.NEEDED_BY_HOUR > 23) {
-  logger.warn({ value: DEFAULTS.NEEDED_BY_HOUR }, 'DEFAULT_NEEDED_BY_HOUR out of range (0-23), using 17');
-  DEFAULTS.NEEDED_BY_HOUR = 17;
-}
-
-if (!SLACK_BOT_TOKEN || !SLACK_APP_LEVEL_TOKEN || !NOTION_TOKEN || !NOTION_DATABASE_ID) {
-  logger.error({ 
-    slackBotToken: !!SLACK_BOT_TOKEN,
-    slackAppToken: !!SLACK_APP_LEVEL_TOKEN, 
-    notionToken: !!NOTION_TOKEN,
-    notionDbId: !!NOTION_DATABASE_ID
-  }, 'Missing required environment variables');
-  process.exit(1);
-}
 
 // Metrics tracking
 const metrics = {
@@ -92,15 +68,14 @@ const metrics = {
 };
 
 const app = new App({
-  token: SLACK_BOT_TOKEN,
-  signingSecret: SLACK_SIGNING_SECRET || 'unused',
+  token: config.slack.botToken,
+  signingSecret: config.slack.signingSecret,
   socketMode: true,
-  appToken: SLACK_APP_LEVEL_TOKEN,
+  appToken: config.slack.appToken,
   logLevel: LogLevel.INFO
 });
 
-
-const notion = new Notion({ auth: NOTION_TOKEN });
+const notion = new Notion({ auth: config.notion.token });
 
 // Throttled Notion API methods with timeout protection
 const notionThrottled = {
@@ -261,7 +236,7 @@ async function createOrUpdateNotionPage({ parsed, permalink, slackTs, reporterMe
       const upd = await notionThrottled.pages.update({ page_id: pageId, properties: props });
       return { id: upd.id, url: upd.url };
     } else {
-      const created = await notionThrottled.pages.create({ parent: { database_id: NOTION_DATABASE_ID }, properties: props });
+      const created = await notionThrottled.pages.create({ parent: { database_id: config.notion.databaseId }, properties: props });
       return { id: created.id, url: created.url };
     }
   } catch (err) {
@@ -290,7 +265,7 @@ async function findPageForMessage({ slackTs, permalink }) {
     } else {
       tsFilter = { property: schema.slackTsProp.name, rich_text: { equals: String(slackTs) } };
     }
-    const byTs = await notionThrottled.databases.query({ database_id: NOTION_DATABASE_ID, filter: tsFilter, page_size: 1 });
+    const byTs = await notionThrottled.databases.query({ database_id: config.notion.databaseId, filter: tsFilter, page_size: 1 });
     if (byTs.results?.[0]) {return byTs.results[0];}
   }
 
@@ -299,7 +274,7 @@ async function findPageForMessage({ slackTs, permalink }) {
     const urlFilter = schema.slackUrlProp.type === 'url'
       ? { property: schema.slackUrlProp.name, url: { equals: permalink } }
       : { property: schema.slackUrlProp.name, rich_text: { contains: permalink } };
-    const byUrl = await notionThrottled.databases.query({ database_id: NOTION_DATABASE_ID, filter: urlFilter, page_size: 1 });
+    const byUrl = await notionThrottled.databases.query({ database_id: config.notion.databaseId, filter: urlFilter, page_size: 1 });
     if (byUrl.results?.[0]) {return byUrl.results[0];}
   }
 
@@ -456,7 +431,7 @@ app.event('message', async ({ event, client }) => {
     
     // Ignore non-user-generated subtypes except edits (handled below)
     if (event.subtype && event.subtype !== 'message_changed') {return;}
-    if (WATCH_CHANNEL_ID && event.channel !== WATCH_CHANNEL_ID) {return;}
+    if (config.slack.watchChannelId && event.channel !== config.slack.watchChannelId) {return;}
 
     // Handle edits (message_changed) separately
     if (event.subtype === 'message_changed') {
@@ -468,7 +443,7 @@ app.event('message', async ({ event, client }) => {
     const trigger = getTrigger(event.text);
     if (!trigger) { return; }
     const suffix = suffixForTrigger(trigger);
-    if (!ALLOW_THREADS_BOOL && !isTopLevel(event)) { 
+    if (!config.slack.allowThreads && !isTopLevel(event)) { 
       return; 
     }
 
@@ -596,7 +571,7 @@ async function handleEdit({ event, client }) {
   const origTs = orig.ts || newMsg.ts; // fallback
 
   // Optional: enforce top-level only (ignore thread replies)
-  if (!ALLOW_THREADS_BOOL && newMsg.thread_ts && newMsg.thread_ts !== newMsg.ts) { 
+  if (!config.slack.allowThreads && newMsg.thread_ts && newMsg.thread_ts !== newMsg.ts) { 
     return; 
   }
   const trigger = getTrigger(newMsg.text);
@@ -714,7 +689,7 @@ const SCHEMA_CACHE_TTL = parseInt(process.env.SCHEMA_CACHE_TTL || '3600000', 10)
  * @throws {Error} If required tracking columns (Slack Message URL or Slack Message TS) are not found
  */
 async function loadSchema(force = false) {
-  const db = await notionThrottled.databases.retrieve({ database_id: NOTION_DATABASE_ID });
+  const db = await notionThrottled.databases.retrieve({ database_id: config.notion.databaseId });
   const byName = {};
   for (const [name, def] of Object.entries(db.properties || {})) {
     byName[name.toLowerCase()] = { id: def.id, name, type: def.type, options: def.select?.options || [] };
@@ -752,7 +727,7 @@ async function loadSchema(force = false) {
   SCHEMA_LOADED_AT = Date.now();
   
   logger.info({ 
-    databaseId: NOTION_DATABASE_ID, 
+    databaseId: config.notion.databaseId, 
     propertyCount: Object.keys(byName).length,
     cacheTtl: SCHEMA_CACHE_TTL,
     forced: force
@@ -991,29 +966,20 @@ const healthServer = http.createServer((req, res) => {
 
 // Startup
 (async () => {
-  // Log configuration at startup
-  logger.info({ 
-    defaults: DEFAULTS,
-    rateLimit: '3 requests/second',
-    timeout: '10 seconds',
-    schemaCacheTTL: '1 hour'
-  }, 'Configuration loaded');
-  
   try { 
     await loadSchema();
-    logger.info({ databaseId: NOTION_DATABASE_ID }, 'Notion schema loaded successfully');
+    logger.info({ databaseId: config.notion.databaseId }, 'Notion schema loaded successfully');
   } catch (e) { 
-    logger.error({ error: e.message, databaseId: NOTION_DATABASE_ID }, 'Failed to load Notion schema');
+    logger.error({ error: e.message, databaseId: config.notion.databaseId }, 'Failed to load Notion schema');
   }
   
-  await app.start(process.env.PORT || 1987);
+  await app.start(config.server.port);
   isHealthy = true; // Mark as healthy after successful Slack connection
-  logger.info({ port: process.env.PORT || 1987, mode: 'Socket Mode' }, '⚡️ On-call auto ingestor running');
+  logger.info({ port: config.server.port, mode: 'Socket Mode' }, '⚡️ On-call auto ingestor running');
   
   // Start health check server
-  const healthPort = parseInt(process.env.HEALTH_PORT || '3000', 10);
-  healthServer.listen(healthPort, () => {
-    logger.info({ healthPort }, 'Health check endpoint available at /health');
+  healthServer.listen(config.server.healthPort, () => {
+    logger.info({ healthPort: config.server.healthPort }, 'Health check endpoint available at /health');
   });
   
   // Log metrics every 5 minutes

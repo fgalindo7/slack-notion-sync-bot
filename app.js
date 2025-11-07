@@ -115,6 +115,17 @@ if (!SLACK_BOT_TOKEN || !SLACK_APP_LEVEL_TOKEN || !NOTION_TOKEN || !NOTION_DATAB
   process.exit(1);
 }
 
+// Metrics tracking
+const metrics = {
+  messagesProcessed: 0,
+  messagesCreated: 0,
+  messagesUpdated: 0,
+  messagesFailed: 0,
+  validationErrors: 0,
+  apiTimeouts: 0,
+  startTime: Date.now()
+};
+
 const app = new App({
   token: SLACK_BOT_TOKEN,
   signingSecret: SLACK_SIGNING_SECRET || 'unused',
@@ -703,6 +714,7 @@ async function notifyNotionPerms({ client, channel, ts, suffix = '' }) {
  * @returns {Promise<void>}
  */
 app.event('message', async ({ event, client }) => {
+  const startTime = Date.now();
   try {
     // Update last activity time for health check
     lastActivityTime = Date.now();
@@ -725,6 +737,14 @@ app.event('message', async ({ event, client }) => {
       return; 
     }
 
+    metrics.messagesProcessed++;
+    logger.info({ 
+      trigger, 
+      channel: event.channel, 
+      user: event.user,
+      metricsTotal: metrics.messagesProcessed
+    }, 'Processing message');
+
     const parsed = parseAutoBlock(event.text || '');
     const miss = missingFields(parsed);
     const issues = typeIssues(parsed);
@@ -739,11 +759,15 @@ app.event('message', async ({ event, client }) => {
     );
 
     if (miss.length) {
+      metrics.validationErrors++;
+      logger.warn({ missingFields: miss, channel: event.channel }, 'Validation failed: missing fields');
       await replyMissing({ client, channel: event.channel, ts: event.ts, fields: miss, suffix });
       return;
     }
 
     if (issues.length) {
+      metrics.validationErrors++;
+      logger.warn({ issues, channel: event.channel }, 'Validation failed: type issues');
       await replyInvalid({ client, channel: event.channel, ts: event.ts, issues, suffix });
       return;
     }
@@ -752,6 +776,8 @@ app.event('message', async ({ event, client }) => {
 
     // Use TS-based lookup to avoid duplicates, then upsert (write TS + permalink)
     const existing = await findPageForMessage({ slackTs: event.ts, permalink });
+    const isUpdate = !!existing;
+    
     try {
       const { url } = await createOrUpdateNotionPage({
         parsed,
@@ -761,6 +787,24 @@ app.event('message', async ({ event, client }) => {
         reporterNotionId,
         pageId: existing?.id
       });
+      
+      const processingTime = Date.now() - startTime;
+      if (isUpdate) {
+        metrics.messagesUpdated++;
+        logger.info({ 
+          pageUrl: url, 
+          processingTime,
+          metricsUpdated: metrics.messagesUpdated
+        }, 'Notion page updated');
+      } else {
+        metrics.messagesCreated++;
+        logger.info({ 
+          pageUrl: url, 
+          processingTime,
+          metricsCreated: metrics.messagesCreated
+        }, 'Notion page created');
+      }
+      
       await replyCreated({ client, channel: event.channel, ts: event.ts, pageUrl: url, parsed, suffix });
     } catch (err) {
       if (isNotionPermError(err)) {
@@ -768,7 +812,14 @@ app.event('message', async ({ event, client }) => {
         return;
       }
       if (err.name === 'TimeoutError') {
-        logger.error({ error: err.message, channel: event.channel, ts: event.ts }, 'API timeout');
+        metrics.apiTimeouts++;
+        metrics.messagesFailed++;
+        logger.error({ 
+          error: err.message, 
+          channel: event.channel, 
+          ts: event.ts,
+          metricsTimeouts: metrics.apiTimeouts
+        }, 'API timeout');
         await client.chat.postMessage({
           channel: event.channel,
           thread_ts: event.ts,
@@ -779,11 +830,13 @@ app.event('message', async ({ event, client }) => {
       throw err; // let outer handler log other errors
     }
   } catch (err) {
+    metrics.messagesFailed++;
     logger.error({ 
       error: err.message, 
       stack: err.stack,
       channel: event.channel,
-      ts: event.ts 
+      ts: event.ts,
+      metricsFailed: metrics.messagesFailed
     }, 'Message handler error');
   }
 });
@@ -797,6 +850,7 @@ app.event('message', async ({ event, client }) => {
  * @returns {Promise<void>}
  */
 async function handleEdit({ event, client }) {
+  const startTime = Date.now();
   // Slack edit payload:
   // event.message.text = new text
   // event.previous_message.ts = original ts
@@ -816,6 +870,14 @@ async function handleEdit({ event, client }) {
   }
   const suffix = suffixForTrigger(trigger);
 
+  metrics.messagesProcessed++;
+  logger.info({ 
+    trigger, 
+    channel, 
+    type: 'edit',
+    metricsTotal: metrics.messagesProcessed
+  }, 'Processing message edit');
+
   const parsed = parseAutoBlock(newMsg.text || '');
   const miss = missingFields(parsed);
   const issues = typeIssues(parsed);
@@ -830,11 +892,15 @@ async function handleEdit({ event, client }) {
   );
 
   if (miss.length) {
+    metrics.validationErrors++;
+    logger.warn({ missingFields: miss, channel }, 'Edit validation failed: missing fields');
     await replyMissing({ client, channel, ts: origTs, fields: miss, suffix });
     return;
   }
 
   if (issues.length) {
+    metrics.validationErrors++;
+    logger.warn({ issues, channel }, 'Edit validation failed: type issues');
     await replyInvalid({ client, channel, ts: origTs, issues, suffix });
     return;
   }
@@ -851,6 +917,16 @@ async function handleEdit({ event, client }) {
       reporterNotionId,
       pageId: existing?.id
     });
+    
+    const processingTime = Date.now() - startTime;
+    metrics.messagesUpdated++;
+    logger.info({ 
+      pageUrl: url, 
+      processingTime,
+      type: 'edit',
+      metricsUpdated: metrics.messagesUpdated
+    }, 'Notion page updated from edit');
+    
     await replyUpdated({ client, channel, ts: origTs, pageUrl: url, parsed, suffix });
   } catch (err) {
     if (isNotionPermError(err)) {
@@ -858,7 +934,15 @@ async function handleEdit({ event, client }) {
       return;
     }
     if (err.name === 'TimeoutError') {
-      logger.error({ error: err.message, channel, ts: origTs }, 'API timeout on edit');
+      metrics.apiTimeouts++;
+      metrics.messagesFailed++;
+      logger.error({ 
+        error: err.message, 
+        channel, 
+        ts: origTs,
+        type: 'edit',
+        metricsTimeouts: metrics.apiTimeouts
+      }, 'API timeout on edit');
       await client.chat.postMessage({
         channel,
         thread_ts: origTs,
@@ -1129,22 +1213,41 @@ const healthServer = http.createServer((req, res) => {
     const now = Date.now();
     const timeSinceActivity = now - lastActivityTime;
     const maxIdleTime = 300000; // 5 minutes
+    const uptime = process.uptime();
     
     if (isHealthy && timeSinceActivity < maxIdleTime) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ 
         status: 'healthy', 
-        uptime: process.uptime(),
-        lastActivity: new Date(lastActivityTime).toISOString()
+        uptime,
+        lastActivity: new Date(lastActivityTime).toISOString(),
+        metrics: {
+          ...metrics,
+          uptimeSeconds: Math.floor(uptime),
+          successRate: metrics.messagesProcessed > 0 
+            ? ((metrics.messagesProcessed - metrics.messagesFailed) / metrics.messagesProcessed * 100).toFixed(2) + '%'
+            : 'N/A'
+        }
       }));
     } else {
       res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ 
         status: 'unhealthy',
         reason: !isHealthy ? 'not_ready' : 'no_recent_activity',
-        uptime: process.uptime()
+        uptime,
+        metrics
       }));
     }
+  } else if (req.url === '/metrics') {
+    // Dedicated metrics endpoint
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      ...metrics,
+      uptime: process.uptime(),
+      successRate: metrics.messagesProcessed > 0 
+        ? ((metrics.messagesProcessed - metrics.messagesFailed) / metrics.messagesProcessed * 100).toFixed(2) + '%'
+        : 'N/A'
+    }, null, 2));
   } else {
     res.writeHead(404, { 'Content-Type': 'text/plain' });
     res.end('Not Found');
@@ -1177,4 +1280,24 @@ const healthServer = http.createServer((req, res) => {
   healthServer.listen(healthPort, () => {
     logger.info({ healthPort }, 'Health check endpoint available at /health');
   });
+  
+  // Log metrics every 5 minutes
+  const metricsInterval = setInterval(() => {
+    const uptime = process.uptime();
+    const successRate = metrics.messagesProcessed > 0 
+      ? ((metrics.messagesProcessed - metrics.messagesFailed) / metrics.messagesProcessed * 100).toFixed(2)
+      : 0;
+    
+    logger.info({ 
+      metrics: {
+        ...metrics,
+        uptimeSeconds: Math.floor(uptime),
+        successRate: `${successRate}%`
+      }
+    }, 'Periodic metrics report');
+  }, 300000); // 5 minutes
+  
+  // Clear interval on shutdown
+  process.on('SIGTERM', () => clearInterval(metricsInterval));
+  process.on('SIGINT', () => clearInterval(metricsInterval));
 })();

@@ -10,6 +10,7 @@ const { App, LogLevel } = bolt;
 import { Client as Notion } from '@notionhq/client';
 import pino from 'pino';
 import pThrottle from 'p-throttle';
+import pTimeout from 'p-timeout';
 
 // Initialize structured logger
 const logger = pino({
@@ -26,6 +27,23 @@ const throttle = pThrottle({
   interval: 1000, // 1 second
   strict: true
 });
+
+// Configurable timeout for API operations (in milliseconds)
+const API_TIMEOUT = parseInt(process.env.API_TIMEOUT || '10000', 10); // Default 10 seconds
+
+/**
+ * Wraps a promise with a timeout to prevent hanging operations
+ * @param {Promise} promise - The promise to wrap
+ * @param {number} [ms=API_TIMEOUT] - Timeout in milliseconds
+ * @param {string} [operation='Operation'] - Description of the operation for error messages
+ * @returns {Promise} Promise that rejects if timeout is exceeded
+ */
+const withTimeout = (promise, ms = API_TIMEOUT, operation = 'Operation') => {
+  return pTimeout(promise, {
+    milliseconds: ms,
+    message: `${operation} timed out after ${ms}ms`
+  });
+};
 
 const {
   SLACK_BOT_TOKEN,
@@ -60,32 +78,52 @@ const app = new App({
 
 const notion = new Notion({ auth: NOTION_TOKEN });
 
-// Throttled Notion API methods to respect rate limits
+// Throttled Notion API methods with timeout protection
 const notionThrottled = {
   databases: {
     retrieve: throttle(async (params) => {
       logger.debug({ databaseId: params.database_id }, 'Notion API: databases.retrieve');
-      return await notion.databases.retrieve(params);
+      return await withTimeout(
+        notion.databases.retrieve(params),
+        API_TIMEOUT,
+        'Notion databases.retrieve'
+      );
     }),
     query: throttle(async (params) => {
       logger.debug({ databaseId: params.database_id }, 'Notion API: databases.query');
-      return await notion.databases.query(params);
+      return await withTimeout(
+        notion.databases.query(params),
+        API_TIMEOUT,
+        'Notion databases.query'
+      );
     })
   },
   pages: {
     create: throttle(async (params) => {
       logger.debug({ databaseId: params.parent?.database_id }, 'Notion API: pages.create');
-      return await notion.pages.create(params);
+      return await withTimeout(
+        notion.pages.create(params),
+        API_TIMEOUT,
+        'Notion pages.create'
+      );
     }),
     update: throttle(async (params) => {
       logger.debug({ pageId: params.page_id }, 'Notion API: pages.update');
-      return await notion.pages.update(params);
+      return await withTimeout(
+        notion.pages.update(params),
+        API_TIMEOUT,
+        'Notion pages.update'
+      );
     })
   },
   users: {
     list: throttle(async (params) => {
       logger.debug('Notion API: users.list');
-      return await notion.users.list(params);
+      return await withTimeout(
+        notion.users.list(params),
+        API_TIMEOUT,
+        'Notion users.list'
+      );
     })
   }
 };
@@ -616,10 +654,14 @@ app.event('message', async ({ event, client }) => {
     const miss = missingFields(parsed);
     const issues = typeIssues(parsed);
 
-    const { permalink = '' } = await client.chat.getPermalink({
-      channel: event.channel,
-      message_ts: event.ts
-    }).then(r => r || {});
+    const { permalink = '' } = await withTimeout(
+      client.chat.getPermalink({
+        channel: event.channel,
+        message_ts: event.ts
+      }).then(r => r || {}),
+      API_TIMEOUT,
+      'Slack getPermalink'
+    );
 
     if (miss.length) {
       await replyMissing({ client, channel: event.channel, ts: event.ts, fields: miss, suffix });
@@ -648,6 +690,15 @@ app.event('message', async ({ event, client }) => {
     } catch (err) {
       if (isNotionPermError(err)) {
         await notifyNotionPerms({ client, channel: event.channel, ts: event.ts, suffix });
+        return;
+      }
+      if (err.name === 'TimeoutError') {
+        logger.error({ error: err.message, channel: event.channel, ts: event.ts }, 'API timeout');
+        await client.chat.postMessage({
+          channel: event.channel,
+          thread_ts: event.ts,
+          text: `⚠️ Request timed out. Please try again in a moment.${suffix}`
+        }).catch(() => {}); // Ignore errors in error handler
         return;
       }
       throw err; // let outer handler log other errors
@@ -694,10 +745,14 @@ async function handleEdit({ event, client }) {
   const miss = missingFields(parsed);
   const issues = typeIssues(parsed);
 
-  const { permalink = '' } = await client.chat.getPermalink({
-    channel,
-    message_ts: origTs
-  }).then(r => r || {});
+  const { permalink = '' } = await withTimeout(
+    client.chat.getPermalink({
+      channel,
+      message_ts: origTs
+    }).then(r => r || {}),
+    API_TIMEOUT,
+    'Slack getPermalink'
+  );
 
   if (miss.length) {
     await replyMissing({ client, channel, ts: origTs, fields: miss, suffix });
@@ -725,6 +780,15 @@ async function handleEdit({ event, client }) {
   } catch (err) {
     if (isNotionPermError(err)) {
       await notifyNotionPerms({ client, channel, ts: origTs, suffix });
+      return;
+    }
+    if (err.name === 'TimeoutError') {
+      logger.error({ error: err.message, channel, ts: origTs }, 'API timeout on edit');
+      await client.chat.postMessage({
+        channel,
+        thread_ts: origTs,
+        text: `⚠️ Request timed out. Please try editing again in a moment.${suffix}`
+      }).catch(() => {}); // Ignore errors in error handler
       return;
     }
     throw err;
@@ -816,7 +880,11 @@ async function findNotionUserIdByEmail(email) {
 async function resolveNotionPersonForSlackUser(slackUserId, client) {
   try {
     if (!slackUserId) return { mention: '', notionId: null };
-    const info = await client.users.info({ user: slackUserId });
+    const info = await withTimeout(
+      client.users.info({ user: slackUserId }),
+      API_TIMEOUT,
+      'Slack users.info'
+    );
     const email = info?.user?.profile?.email || null;
     const mention = `<@${slackUserId}>`;
     if (!email) return { mention, notionId: null }; // requires users:read.email; fallback to mention text

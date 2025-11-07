@@ -217,16 +217,6 @@ function parseNeededByString(input) {
 }
 
 /**
- * Validates if a string is a properly formatted email address
- * @param {string} s - The string to validate
- * @returns {boolean} True if the string is a valid email format, false otherwise
- */
-function isEmail(s) {
-  if (!s || typeof s !== 'string') return false;
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim());
-}
-
-/**
  * Normalizes Slack email formats to plain email addresses
  * Handles Slack's mailto links and angle-bracket wrapping
  * @param {string} s - The potentially Slack-formatted email string

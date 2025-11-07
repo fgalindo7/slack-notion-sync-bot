@@ -1,12 +1,12 @@
 {
   "display_information": {
-    "name": "On-call Auto Ingestor",
+    "name": "On-Call Cat",
     "description": "Listens for @auto messages in on-call channels and logs them to Notion.",
     "background_color": "#3F0E40"
   },
   "features": {
     "bot_user": {
-      "display_name": "On-call Bot",
+      "display_name": "On-Call Cat",
       "always_online": true
     }
   },

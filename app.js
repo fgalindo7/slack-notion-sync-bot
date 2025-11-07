@@ -936,7 +936,7 @@ const healthServer = http.createServer((req, res) => {
   
   await app.start(config.server.port);
   isHealthy = true; // Mark as healthy after successful Slack connection
-  logger.info({ port: config.server.port, mode: 'Socket Mode' }, '⚡️ On-call auto ingestor running');
+  logger.info({ port: config.server.port, mode: 'Socket Mode' }, '⚡️ On-Call Cat running');
   
   // Start health check server
   healthServer.listen(config.server.healthPort, () => {

@@ -855,11 +855,11 @@ git add coverage/
 # coverage/, .nyc_output/, .c8/ are excluded
 ```
 
-**Using ```bash instead of```shell:**
+**Using \`\`\`shell \`\`\`bash:**
 
 ```markdown
-# WRONG - Don't use bash
 ```bash
+# WRONG - Don't use bash
 npm test
 ```​
 
@@ -869,7 +869,7 @@ npm test
 ```​
 ```
 
-### ✅ Do This
+### Do This
 
 **Check project structure first:**
 
@@ -994,6 +994,6 @@ Alt+\ - Trigger code completion
 ---
 
 <p align="center">
-  <sub>🤖 This document was created collaboratively by humans and AI agents.</sub><br>
+  <sub>🐱 This document was created collaboratively by humans and cats.</sub><br>
   <sub>Last updated: November 10, 2025</sub>
 </p>

@@ -7,13 +7,15 @@
     "start": "node app.js",
     "lint": "eslint '**/*.{js,mjs}' --ignore-pattern 'node_modules/'",
     "lint:fix": "eslint '**/*.{js,mjs}' --ignore-pattern 'node_modules/' --fix",
-    "test": "node lib/parser.test.js && node lib/validation.test.js",
+    "test": "node lib/parser.test.js && node lib/validation.test.js && node lib/ai-suggestions.test.js",
     "test:parser": "node lib/parser.test.js",
     "test:validation": "node lib/validation.test.js",
+    "test:ai": "node lib/ai-suggestions.test.js",
     "test:coverage": "c8 --reporter=text --reporter=html --reporter=lcov npm test",
     "test:coverage:check": "c8 --check-coverage --lines 75 --functions 60 --branches 60 npm test"
   },
   "dependencies": {
+    "@google-cloud/vertexai": "^1.9.0",
     "@notionhq/client": "^2.2.15",
     "@slack/bolt": "^3.18.0",
     "p-throttle": "^8.0.0",

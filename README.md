@@ -36,6 +36,130 @@ No more manual copy-pasting — just type `@auto` in Slack and let the bot take 
 - **Graceful shutdown:** Proper cleanup on SIGTERM/SIGINT for zero-downtime deployments.
 - **Structured logging:** JSON logs with Pino for production-ready observability.
 - **Socket Mode ready:** Runs seamlessly via Slack Socket Mode for instant responsiveness.
+- **🤖 AI-Powered Suggestions:** Automatically suggests similar historical cases using Vertex AI (Gemini Pro).
+
+---
+
+## 🤖 AI-Powered Similar Case Suggestions (Optional)
+
+On-Call Cat can intelligently suggest similar historical cases from your Notion database using Google Cloud's Vertex AI. When a new issue is reported, the bot analyzes past resolved cases and provides contextual suggestions to help resolve incidents faster.
+
+### How AI Suggestions Work
+
+1. **User reports new issue** → Bot creates Notion page
+2. **Bot queries historical cases** → Filters last 90 days of resolved issues
+3. **AI analyzes similarity** → Uses Gemini Pro to find related cases
+4. **Bot suggests solutions** → Posts top 2-3 matches to Slack thread
+
+### Example AI Response
+
+```
+✅ Tracked: Notion DB › Production API timeout
+
+🤖 I found 2 similar cases that might help:
+
+1. **Login timeout on production** (85% similar)
+   • Why similar: Both involve authentication timeouts with OAuth
+   • Try this: Check OAuth provider rate limits and session timeout settings
+   • View case
+
+2. **API 500 errors on /users endpoint** (72% similar)
+   • Why similar: Similar API error patterns on user-related endpoints
+   • Try this: Review API error logs and database query performance
+   • View case
+
+💡 Have you tried any of these approaches? Reply here if you need more details!
+```
+
+### AI Configuration
+
+Add these environment variables to enable AI suggestions:
+
+```env
+# Required for AI features
+AI_SUGGESTIONS_ENABLED=true
+GCP_PROJECT_ID=your-gcp-project-id
+
+# Optional (with defaults shown)
+VERTEX_AI_LOCATION=us-central1
+VERTEX_AI_MODEL=gemini-pro
+AI_MAX_HISTORICAL_CASES=20
+AI_SIMILARITY_THRESHOLD=0.7
+AI_QUERY_DAYS_BACK=90
+AI_CACHE_TTL=300000
+```
+
+### GCP Setup for AI Features
+
+#### 1. Enable Vertex AI API
+
+```shell
+gcloud services enable aiplatform.googleapis.com
+```
+
+#### 2. Grant IAM Permissions
+
+For Cloud Run deployments:
+
+```shell
+SERVICE_ACCOUNT="oncall-cat@${PROJECT_ID}.iam.gserviceaccount.com"
+gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+  --member="serviceAccount:${SERVICE_ACCOUNT}" \
+  --role="roles/aiplatform.user"
+```
+
+For local development:
+
+```shell
+# Authenticate with your user account
+gcloud auth application-default login
+```
+
+#### 3. Update Deployment
+
+Add AI configuration to your Cloud Run deployment:
+
+```shell
+gcloud run deploy oncall-cat \
+  --update-env-vars="AI_SUGGESTIONS_ENABLED=true,GCP_PROJECT_ID=${PROJECT_ID}" \
+  # ... other flags
+```
+
+### Cost Estimate
+
+**Gemini Pro pricing (as of 2025):**
+- Input: $0.00025 / 1K characters
+- Output: $0.0005 / 1K characters
+- **~$0.00075 per suggestion**
+
+**Monthly estimate (100 issues):** ~$0.08
+
+### Features & Behavior
+
+- ✅ **Non-blocking:** AI failures never affect core bot functionality
+- ✅ **Smart caching:** 5-minute cache reduces redundant queries
+- ✅ **Intelligent filtering:** Only queries resolved cases from last 90 days
+- ✅ **Similarity threshold:** Only shows cases ≥70% similar (configurable)
+- ✅ **Top matches:** Limits to 3 most relevant suggestions
+- ✅ **Graceful degradation:** If disabled or failing, bot continues normally
+- ✅ **Comprehensive metrics:** Track requests, successes, failures via `/metrics`
+
+### Metrics
+
+AI suggestion metrics are included in the `/metrics` endpoint:
+
+```json
+{
+  "aiSuggestionsRequested": 45,
+  "aiSuggestionsReturned": 32,
+  "aiSuggestionsEmpty": 8,
+  "aiSuggestionsFailed": 5
+}
+```
+
+### Disabling AI Suggestions
+
+Set `AI_SUGGESTIONS_ENABLED=false` or omit it entirely. The bot will function normally without AI features.
 
 ---
 
@@ -52,7 +176,15 @@ Rate Limiter (3 req/s) → Timeout Protection (10s) → Notion API
     ↓
 Notion Database (Create/Update Page)
     ↓
-Success/Error Response to Slack Thread
+Success Response to Slack Thread
+    ↓
+[Optional] AI Suggestions (Vertex AI / Gemini Pro)
+    ↓
+    • Query Historical Cases (last 90 days)
+    ↓
+    • Analyze Similarity with LLM
+    ↓
+    • Post Similar Cases to Thread (if found)
 ```
 
 **Flow:**
@@ -160,6 +292,14 @@ The bot will auto-detect these columns by name. If neither exists, message updat
 | HEALTH_PORT | Port for health check server (default: 1987) | ⚠️ Optional |
 | PORT | Port for main app (default: 1987) | ⚠️ Optional |
 | LOG_LEVEL | Logging level: trace, debug, info, warn, error (default: info) | ⚠️ Optional |
+| **AI_SUGGESTIONS_ENABLED** | **Enable AI-powered similar case suggestions (true/false, default: false)** | ⚠️ **Optional** |
+| **GCP_PROJECT_ID** | **Google Cloud project ID (required if AI enabled)** | ⚠️ **Optional** |
+| **VERTEX_AI_LOCATION** | **Vertex AI region (default: us-central1)** | ⚠️ **Optional** |
+| **VERTEX_AI_MODEL** | **AI model name (default: gemini-pro)** | ⚠️ **Optional** |
+| **AI_MAX_HISTORICAL_CASES** | **Max historical cases to query (default: 20)** | ⚠️ **Optional** |
+| **AI_SIMILARITY_THRESHOLD** | **Minimum similarity score 0-1 (default: 0.7)** | ⚠️ **Optional** |
+| **AI_QUERY_DAYS_BACK** | **How far back to query cases in days (default: 90)** | ⚠️ **Optional** |
+| **AI_CACHE_TTL** | **Cache TTL for AI queries in ms (default: 300000)** | ⚠️ **Optional** |
 
 Store these in `.env` or a secret manager (Doppler, Vault, etc).
 
@@ -272,6 +412,10 @@ Relevant Links: <https://status.acme.io>, <https://notion.so/acme-api>
 | **createOrUpdateNotionPage()** | Creates or updates Notion pages dynamically | `app.js` |
 | **findPageForMessage()** | Finds existing pages by Slack TS (ensures idempotent updates) | `app.js` |
 | **getSchema()** | Retrieves cached Notion DB schema, auto-refreshes when expired | `app.js` |
+| **NotionKnowledgeBase** | Queries and caches historical cases for AI analysis | `lib/ai-suggestions.js` |
+| **AISuggestionEngine** | Interfaces with Vertex AI to find similar cases | `lib/ai-suggestions.js` |
+| **handleAISuggestions()** | Orchestrates AI suggestions with graceful error handling | `app.js` |
+| **replyWithSuggestions()** | Formats and posts AI suggestions to Slack | `app.js` |
 
 ### Modular Architecture
 
@@ -287,6 +431,7 @@ The codebase follows a hybrid functional/OO approach:
 
 - **Slack Bolt JS** (v3.18.0) - Slack app framework with Socket Mode
 - **Notion SDK** (v2.2.15) - Official Notion API client
+- **Vertex AI SDK** (v1.9.0) - Google Cloud AI/ML platform (optional, for AI suggestions)
 - **Validator** (v13.12.0) - RFC-compliant email validation
 - **Node.js 20** - Alpine-based Docker image
 - **Pino** - High-performance structured JSON logging
@@ -314,9 +459,11 @@ npm run lint:fix  # Auto-fix issues
 Run tests:
 
 ```shell
-npm test                  # Run all tests
-npm run test:parser       # Parser tests only
-npm run test:validation   # Validation tests only
+npm test                  # Run all tests (95 total)
+npm run test:parser       # Parser tests only (53 tests)
+npm run test:validation   # Validation tests only (27 tests)
+npm run test:ai           # AI suggestions tests only (15 tests)
+npm run test:coverage     # Run with coverage report
 ```
 
 Check syntax:
@@ -351,8 +498,10 @@ curl http://localhost:1987/health
     "messagesFailed": 2,
     "validationErrors": 5,
     "apiTimeouts": 1,
-    "rateLimitHits": 0,
-    "notionErrors": 1,
+    "aiSuggestionsRequested": 35,
+    "aiSuggestionsReturned": 28,
+    "aiSuggestionsEmpty": 5,
+    "aiSuggestionsFailed": 2,
     "uptimeSeconds": 3600,
     "successRate": "95.24%"
   }
@@ -565,29 +714,31 @@ on-call-cat/
 ├── manifest.json                 # Slack app manifest
 ├── channel-mappings.json.example # Example multi-channel config
 ├── docs/                         # Documentation
-│   ├── GCP_DEPLOYMENT.md        # Comprehensive GCP deployment guide
-│   ├── GCP_QUICK_REFERENCE.md   # Quick command reference
-│   ├── SETUP_FLOW.md            # Deployment wizard flow diagram
-│   └── SCRIPT_FLAGS.md          # Script flags and selective execution
+│   ├── GCP_DEPLOYMENT.md         # Comprehensive GCP deployment guide
+│   ├── GCP_QUICK_REFERENCE.md    # Quick command reference
+│   ├── SETUP_FLOW.md             # Deployment wizard flow diagram
+│   └── SCRIPT_FLAGS.md           # Script flags and selective execution
 ├── scripts/                      # Deployment automation scripts
-│   ├── setup-gcp.sh             # Initial GCP setup (APIs, registry)
-│   ├── create-secrets.sh        # Create secrets in Secret Manager
-│   ├── deploy-gcp.sh            # Deploy to Cloud Run
-│   ├── setup-and-deploy.sh      # Interactive deployment wizard
-│   ├── view-logs.sh             # View Cloud Run logs
-│   └── check-health.sh          # Check service health status
+│   ├── setup-gcp.sh              # Initial GCP setup (APIs, registry)
+│   ├── create-secrets.sh         # Create secrets in Secret Manager
+│   ├── deploy-gcp.sh             # Deploy to Cloud Run
+│   ├── setup-and-deploy.sh       # Interactive deployment wizard
+│   ├── view-logs.sh              # View Cloud Run logs
+│   └── check-health.sh           # Check service health status
 ├── lib/                          # Modular components
-│   ├── config.js                # Centralized configuration & multi-channel routing
-│   ├── constants.js             # App-wide constants (defaults, regexes)
-│   ├── metrics.js               # BotMetrics class for tracking
-│   ├── parser.js                # Message parsing, email normalization, date parsing
-│   ├── parser.test.js           # Unit tests for parser functions
-│   ├── validation.js            # Field validation functions
-│   ├── validation.test.js       # Unit tests for validation functions
-│   └── schema-cache.js          # NotionSchemaCache class with TTL
+│   ├── config.js                 # Centralized configuration & multi-channel routing
+│   ├── constants.js              # App-wide constants (defaults, regexes)
+│   ├── metrics.js                # BotMetrics class for tracking
+│   ├── parser.js                 # Message parsing, email normalization, date parsing
+│   ├── parser.test.js            # Unit tests for parser functions (53 tests)
+│   ├── validation.js             # Field validation functions
+│   ├── validation.test.js        # Unit tests for validation functions (27 tests)
+│   ├── schema-cache.js           # NotionSchemaCache class with TTL
+│   ├── ai-suggestions.js         # AI-powered similar case suggestions (optional)
+│   └── ai-suggestions.test.js    # Unit tests for AI module (15 tests)
 ├── logo/                         # Brand assets
-│   ├── on-call-cat.png          # Main logo
-│   └── on-call-cat-2.png        # Small logo variant
+│   ├── on-call-cat.png           # Main logo
+│   └── on-call-cat-2.png         # Small logo variant
 └── README.md                     # This file
 ```
 

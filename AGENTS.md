@@ -797,7 +797,162 @@ jobs:
 
 ---
 
-## 13. Common Mistakes to Avoid (For AI Assistants)
+## 13. AI-Powered Similar Case Suggestions
+
+### Feature Overview
+
+As of November 2025, On-Call Cat includes **AI-powered similar case suggestions** using Google Cloud's Vertex AI (Gemini Pro). This feature analyzes historical cases and suggests relevant solutions when new issues are reported.
+
+### Implementation Architecture
+
+```
+User reports issue
+    ↓
+Bot creates Notion page
+    ↓
+[AI Feature - Non-blocking]
+    ↓
+NotionKnowledgeBase queries historical cases (90 days, cached 5min)
+    ↓
+AISuggestionEngine calls Vertex AI (Gemini Pro)
+    ↓
+Similarity analysis with structured JSON output
+    ↓
+Top 2-3 matches (≥70% similar) posted to Slack thread
+```
+
+### Key Design Principles
+
+**1. Non-Blocking Architecture**
+- AI suggestions run asynchronously after Notion page creation
+- Failures never affect core bot functionality
+- Fire-and-forget pattern with comprehensive error logging
+
+**2. Graceful Degradation**
+- Feature flag: `AI_SUGGESTIONS_ENABLED=true/false`
+- Lazy initialization - engines created only when needed
+- Silent failure - users unaffected by AI errors
+
+**3. Smart Resource Management**
+- Caching: 5-minute TTL reduces redundant queries
+- Query filtering: Only resolved cases from last 90 days
+- Similarity threshold: Default 0.7 (configurable)
+- Match limiting: Top 3 results only
+
+### Module Structure
+
+```javascript
+// lib/ai-suggestions.js (438 lines)
+export class NotionKnowledgeBase {
+  // Queries and formats historical cases
+  // Smart caching with TTL
+}
+
+export class AISuggestionEngine {
+  // Vertex AI integration
+  // Prompt engineering
+  // JSON response parsing
+}
+
+// app.js integration functions
+async function handleAISuggestions()     // Orchestration
+async function replyWithSuggestions()    // Slack formatting
+function getAIEngine()                   // Lazy initialization
+```
+
+### Environment Variables
+
+```shell
+# Required
+AI_SUGGESTIONS_ENABLED=true
+GCP_PROJECT_ID=your-project-id
+
+# Optional (with sensible defaults)
+VERTEX_AI_LOCATION=us-central1
+VERTEX_AI_MODEL=gemini-pro
+AI_MAX_HISTORICAL_CASES=20
+AI_SIMILARITY_THRESHOLD=0.7
+AI_QUERY_DAYS_BACK=90
+AI_CACHE_TTL=300000  # 5 minutes
+```
+
+### GCP Setup
+
+```shell
+# Enable Vertex AI API
+gcloud services enable aiplatform.googleapis.com
+
+# Grant IAM permissions (Cloud Run)
+gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+  --member="serviceAccount:${SERVICE_ACCOUNT}" \
+  --role="roles/aiplatform.user"
+
+# Local development
+gcloud auth application-default login
+```
+
+### Metrics Tracking
+
+```javascript
+// Added to BotMetrics class
+aiSuggestionsRequested: 0,   // Total requests
+aiSuggestionsReturned: 0,    // Successful matches
+aiSuggestionsEmpty: 0,       // No matches found
+aiSuggestionsFailed: 0,      // Processing errors
+```
+
+Available in `/metrics` endpoint for monitoring.
+
+### Testing
+
+```shell
+npm run test:ai  # 15 tests for AI module
+# Tests cover:
+# - NotionKnowledgeBase: 5 tests
+# - AISuggestionEngine: 6 tests
+# - Integration scenarios: 3 tests
+# - Error handling: 1 test
+```
+
+All tests use mocked Notion and Vertex AI responses.
+
+### Cost Estimate
+
+**Gemini Pro pricing:**
+- ~$0.00075 per suggestion
+- **Monthly (100 issues): ~$0.08**
+
+### Implementation Timeline
+
+- **November 10, 2025:** Module structure created (e82e56d)
+- **November 11, 2025:** Integration complete (223a7d9)
+- **Total:** +1,418 lines across 8 files
+
+### For AI Assistants Working on This Feature
+
+**Key Files:**
+- `lib/ai-suggestions.js` - Core AI logic (438 lines)
+- `lib/ai-suggestions.test.js` - Test suite (524 lines)
+- `lib/config.js` - Configuration with vertexAI section
+- `lib/metrics.js` - AI metrics tracking
+- `app.js` - Integration and helper functions
+
+**Important Patterns:**
+- Always use feature flag checks before AI operations
+- Never throw errors that would stop core functionality
+- Log all AI operations for observability
+- Use lazy initialization for AI engines
+- Enrich responses with Notion URLs before sending to Slack
+
+**Common Tasks:**
+- Updating similarity threshold: Change `AI_SIMILARITY_THRESHOLD`
+- Changing query window: Modify `AI_QUERY_DAYS_BACK`
+- Adjusting cache: Update `AI_CACHE_TTL`
+- Switching models: Set `VERTEX_AI_MODEL` (e.g., "gemini-1.5-pro")
+
+---
+
+## 14. Common Mistakes to Avoid (For AI Assistants)
 
 ### ❌ Don't Do This
 

@@ -2,6 +2,8 @@
 
 **Purpose:** This document helps AI assistants (like GitHub Copilot Chat) understand how to work effectively in this repository - what tools exist, what workflows to follow, and what standards to maintain.
 
+**Note for AI Assistants:** If you discover patterns, make mistakes, or learn something that would help future AI assistants work better in this repo, please update this file with your learnings. Add to the "Common Mistakes" section, update standards, or clarify existing instructions.
+
 ---
 
 ## Quick Reference for AI Assistants

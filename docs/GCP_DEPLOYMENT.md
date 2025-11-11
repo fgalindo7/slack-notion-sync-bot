@@ -43,7 +43,7 @@ Before starting, have these ready:
 
 ### 1. Authenticate with GCP
 
-```sh
+```shell
 # Login to GCP
 gcloud auth login
 
@@ -59,7 +59,7 @@ export REGION="us-central1"  # or us-east1, europe-west1, etc.
 
 This will enable required APIs and create the Artifact Registry repository:
 
-```sh
+```shell
 ./scripts/setup-gcp.sh
 ```
 
@@ -72,7 +72,7 @@ This will enable required APIs and create the Artifact Registry repository:
 
 Store your credentials securely in Secret Manager:
 
-```sh
+```shell
 ./scripts/create-secrets.sh
 ```
 
@@ -85,7 +85,7 @@ Store your credentials securely in Secret Manager:
 
 **Verify secrets were created:**
 
-```sh
+```shell
 gcloud secrets list
 ```
 
@@ -97,7 +97,7 @@ gcloud secrets list
 
 **For Single-Channel Mode:**
 
-```sh
+```shell
 # Set your channel and database IDs
 export WATCH_CHANNEL_ID="C1234567890"
 export NOTION_DATABASE_ID="abc123def456ghi789"
@@ -109,7 +109,7 @@ gcloud builds submit --config cloudbuild.yaml && \
 
 **For Multi-Channel Mode:**
 
-```sh
+```shell
 # Create your channel-mappings.json first (see example)
 cp channel-mappings.json.example channel-mappings.json
 # Edit channel-mappings.json with your actual channel/database IDs
@@ -127,7 +127,7 @@ gcloud builds submit --config cloudbuild.yaml && \
 
 **Step 1: Build Docker Image**
 
-```sh
+```shell
 gcloud builds submit --config cloudbuild.yaml
 ```
 
@@ -135,7 +135,7 @@ This builds your Docker image and pushes it to Artifact Registry.
 
 **Step 2: Deploy to Cloud Run**
 
-```sh
+```shell
 # Single-channel
 export WATCH_CHANNEL_ID="C1234567890"
 export NOTION_DATABASE_ID="abc123def456ghi789"
@@ -152,7 +152,7 @@ export MULTI_CHANNEL=true
 
 ### 1. Check Deployment Status
 
-```sh
+```shell
 # View service details
 gcloud run services describe oncall-cat --region=$REGION
 
@@ -163,7 +163,7 @@ echo "Service URL: $SERVICE_URL"
 
 ### 2. Test Health Endpoint
 
-```sh
+```shell
 ./scripts/check-health.sh
 ```
 
@@ -183,7 +183,7 @@ echo "Service URL: $SERVICE_URL"
 
 ### 3. View Logs
 
-```sh
+```shell
 # View recent logs
 ./scripts/view-logs.sh
 
@@ -221,7 +221,7 @@ echo "Service URL: $SERVICE_URL"
 
 ### Update Environment Variables
 
-```sh
+```shell
 # Example: Change log level to debug
 gcloud run services update oncall-cat \
   --region=$REGION \
@@ -230,7 +230,7 @@ gcloud run services update oncall-cat \
 
 ### Update Secrets
 
-```sh
+```shell
 # Create new version of a secret
 echo -n "new-token-value" | \
   gcloud secrets versions add slack-bot-token --data-file=-
@@ -244,7 +244,7 @@ gcloud run services update oncall-cat \
 
 ### Update Channel Mappings (Multi-Channel Mode)
 
-```sh
+```shell
 # Edit your local channel-mappings.json
 vim channel-mappings.json
 
@@ -259,7 +259,7 @@ gcloud run services update oncall-cat \
 
 ### Deploy New Version
 
-```sh
+```shell
 # Build new image
 gcloud builds submit --config cloudbuild.yaml
 
@@ -280,17 +280,17 @@ View in GCP Console:
 
 ### Command Line Monitoring
 
-```sh
-# Real-time logs
-gcloud run services logs tail oncall-cat --region=$REGION
+```shell
+# View recent logs
+./scripts/view-logs.sh
 
-# Recent logs (last 50 lines)
-gcloud run services logs read oncall-cat --region=$REGION --limit=50
+# Follow logs in real-time
+./scripts/view-logs.sh --follow
 
-# Filter logs by severity
-gcloud run services logs read oncall-cat \
-  --region=$REGION \
-  --log-filter="severity>=ERROR"
+# Filter logs by severity (using gcloud logging)
+gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=oncall-cat AND severity>=ERROR" \
+  --limit=50 \
+  --project=$PROJECT_ID
 
 # Check service metrics
 ./scripts/check-health.sh
@@ -298,7 +298,7 @@ gcloud run services logs read oncall-cat \
 
 ### Set Up Alerts
 
-```sh
+```shell
 # Create alert policy for service errors
 gcloud alpha monitoring policies create \
   --notification-channels=YOUR_CHANNEL_ID \
@@ -317,7 +317,7 @@ gcloud alpha monitoring policies create \
 
 **Check logs for errors:**
 
-```sh
+```shell
 ./scripts/view-logs.sh
 ```
 
@@ -340,7 +340,7 @@ gcloud alpha monitoring policies create \
 
 **Grant Cloud Run service account access to secrets:**
 
-```sh
+```shell
 # Get service account email
 SA_EMAIL=$(gcloud run services describe oncall-cat \
   --region=$REGION \
@@ -356,7 +356,7 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
 
 **Check instance count:**
 
-```sh
+```shell
 gcloud run services describe oncall-cat \
   --region=$REGION \
   --format='value(spec.template.spec.containerConcurrency)'
@@ -369,7 +369,7 @@ gcloud run services describe oncall-cat \
 
 ### Rollback to Previous Version
 
-```sh
+```shell
 # List revisions
 gcloud run revisions list \
   --service=oncall-cat \
@@ -383,7 +383,7 @@ gcloud run services update-traffic oncall-cat \
 
 ### Delete and Redeploy
 
-```sh
+```shell
 # Delete service
 gcloud run services delete oncall-cat --region=$REGION
 

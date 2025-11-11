@@ -20,6 +20,7 @@ import { parseAutoBlock, parseNeededByString, normalizeEmail, stripRichTextForma
 import { missingFields, typeIssues, isTopLevel, getTrigger, suffixForTrigger } from './lib/validation.js';
 import { BotMetrics } from './lib/metrics.js';
 import { NotionSchemaCache } from './lib/schema-cache.js';
+import { NotionKnowledgeBase, AISuggestionEngine } from './lib/ai-suggestions.js';
 
 // Load and validate configuration
 const config = getConfig();
@@ -60,6 +61,9 @@ const withTimeout = (promise, ms = config.api.timeout, operation = 'Operation') 
 
 // Initialize metrics tracking
 const metrics = new BotMetrics();
+
+// Initialize AI suggestion engines per database (only if enabled)
+const aiEngines = new Map(); // Map<databaseId, AISuggestionEngine>
 
 const app = new App({
   token: config.slack.botToken,
@@ -371,6 +375,151 @@ async function replyUpdated({ client, channel, ts, pageUrl, parsed, suffix = '',
   await client.chat.postMessage({ channel, thread_ts: ts, text });
 }
 
+/**
+ * Posts AI-powered similar case suggestions to Slack thread
+ * @param {Object} params - Function parameters
+ * @param {Object} params.client - Slack Web API client
+ * @param {string} params.channel - Slack channel ID
+ * @param {string} params.ts - Message timestamp (for threading)
+ * @param {Object} params.suggestions - AI suggestions result
+ * @param {string} [params.suffix=''] - Optional emoji suffix to append
+ * @returns {Promise<void>}
+ */
+async function replyWithSuggestions({ client, channel, ts, suggestions, suffix = '' }) {
+  if (!suggestions.hasSimilarCases || suggestions.matches.length === 0) {
+    return; // No suggestions to display
+  }
+
+  // Build suggestion message
+  const matchTexts = suggestions.matches.map((match, idx) => {
+    const percentage = Math.round(match.similarity * 100);
+    return `${idx + 1}. *${match.title}* (${percentage}% similar)\n   • _Why similar:_ ${match.reason}\n   • _Try this:_ ${match.suggestedAction}\n   • <${match.url || '#'}|View case>`;
+  }).join('\n\n');
+
+  const text = 
+    `🤔 *I found ${suggestions.matches.length} similar case${suggestions.matches.length > 1 ? 's' : ''} that might help:*\n\n` +
+    matchTexts +
+    `\n\n💡 Have you tried any of these approaches? Reply here if you need more details!` +
+    suffix;
+
+  await client.chat.postMessage({ channel, thread_ts: ts, text });
+}
+
+/**
+ * Gets or creates an AI suggestion engine for a specific database
+ * Lazily initializes engines only when needed
+ * @param {string} databaseId - Notion database ID
+ * @returns {AISuggestionEngine|null} Engine instance or null if AI disabled
+ */
+function getAIEngine(databaseId) {
+  // Check if AI suggestions are enabled
+  if (!config.vertexAI.enabled) {
+    return null;
+  }
+
+  // Return existing engine if already initialized
+  if (aiEngines.has(databaseId)) {
+    return aiEngines.get(databaseId);
+  }
+
+  // Create new engine for this database
+  try {
+    const knowledgeBase = new NotionKnowledgeBase({
+      notionClient: notionThrottled,
+      logger,
+      databaseId,
+      maxCases: config.vertexAI.maxHistoricalCases,
+      cacheTTL: config.vertexAI.cacheTTL
+    });
+
+    const engine = new AISuggestionEngine({
+      vertexAIConfig: config.vertexAI,
+      logger,
+      knowledgeBase
+    });
+
+    aiEngines.set(databaseId, engine);
+    logger.info({ databaseId }, 'AI suggestion engine initialized for database');
+    
+    return engine;
+  } catch (err) {
+    logger.error({ 
+      error: err.message, 
+      databaseId 
+    }, 'Failed to initialize AI suggestion engine');
+    return null;
+  }
+}
+
+/**
+ * Handles AI-powered similar case suggestions
+ * Non-blocking: errors are logged but don't affect main bot functionality
+ * @param {Object} params - Function parameters
+ * @param {Object} params.parsed - Parsed issue data
+ * @param {string} params.databaseId - Notion database ID
+ * @param {string} params.channel - Slack channel ID
+ * @param {string} params.ts - Message timestamp
+ * @param {Object} params.client - Slack Web API client
+ * @param {string} [params.suffix=''] - Optional emoji suffix
+ * @returns {Promise<void>}
+ */
+async function handleAISuggestions({ parsed, databaseId, channel, ts, client, suffix = '' }) {
+  // Feature flag check
+  if (!config.vertexAI.enabled) {
+    logger.debug('AI suggestions disabled via config');
+    return;
+  }
+
+  metrics.increment('aiSuggestionsRequested');
+
+  try {
+    const engine = getAIEngine(databaseId);
+    if (!engine) {
+      logger.debug({ databaseId }, 'AI engine not available');
+      metrics.increment('aiSuggestionsFailed');
+      return;
+    }
+
+    logger.debug({ 
+      issue: parsed.issue, 
+      priority: parsed.priority 
+    }, 'Requesting AI suggestions');
+
+    const suggestions = await engine.findSimilarCases(parsed);
+
+    // Enrich matches with Notion URLs
+    for (const match of suggestions.matches) {
+      if (match.caseId) {
+        match.url = `https://notion.so/${match.caseId.replace(/-/g, '')}`;
+      }
+    }
+
+    if (!suggestions.hasSimilarCases || suggestions.matches.length === 0) {
+      metrics.increment('aiSuggestionsEmpty');
+      logger.info({ issue: parsed.issue }, 'No similar cases found');
+      return;
+    }
+
+    metrics.increment('aiSuggestionsReturned');
+    logger.info({ 
+      issue: parsed.issue,
+      matchCount: suggestions.matches.length 
+    }, 'AI suggestions generated');
+
+    await replyWithSuggestions({ client, channel, ts, suggestions, suffix });
+
+  } catch (err) {
+    metrics.increment('aiSuggestionsFailed');
+    
+    // Log but don't notify user (silent failure for non-critical feature)
+    logger.warn({ 
+      error: err.message,
+      stack: err.stack,
+      issue: parsed.issue 
+    }, 'AI suggestions failed (non-blocking)');
+  }
+}
+
 // --- Bolt error handler (middleware/runtime) ---
 app.error(async (error) => {
   if (isExplicitSocketDisconnect(error)) {
@@ -520,6 +669,17 @@ app.event('message', async ({ event, client }) => {
       }
       
       await replyCreated({ client, channel: event.channel, ts: event.ts, pageUrl: url, parsed, suffix, databaseId });
+      
+      // AI suggestions (non-blocking, fire-and-forget)
+      handleAISuggestions({ 
+        parsed, 
+        databaseId, 
+        channel: event.channel, 
+        ts: event.ts, 
+        client, 
+        suffix 
+      }).catch(() => {}); // Errors already logged in handleAISuggestions
+      
     } catch (err) {
       if (isNotionPermError(err)) {
         await notifyNotionPerms({ client, channel: event.channel, ts: event.ts, suffix, databaseId });
@@ -644,6 +804,17 @@ async function handleEdit({ event, client, databaseId }) {
     }, 'Notion page updated from edit');
     
     await replyUpdated({ client, channel, ts: origTs, pageUrl: url, parsed, suffix, databaseId });
+    
+    // AI suggestions on edit (non-blocking, fire-and-forget)
+    handleAISuggestions({ 
+      parsed, 
+      databaseId, 
+      channel, 
+      ts: origTs, 
+      client, 
+      suffix 
+    }).catch(() => {}); // Errors already logged in handleAISuggestions
+    
   } catch (err) {
     if (isNotionPermError(err)) {
       await notifyNotionPerms({ client, channel, ts: origTs, suffix, databaseId });

@@ -51,7 +51,8 @@ gcloud services enable \
   run.googleapis.com \
   artifactregistry.googleapis.com \
   secretmanager.googleapis.com \
-  cloudbuild.googleapis.com
+  cloudbuild.googleapis.com \
+  aiplatform.googleapis.com
 
 echo ""
 echo -e "${GREEN}Step 2: Creating Artifact Registry repository...${NC}"
@@ -89,6 +90,15 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
   --condition=None \
   > /dev/null 2>&1 || echo -e "${YELLOW}Note: Permission already exists or couldn't be set${NC}"
 
+echo ""
+echo -e "${GREEN}Step 5: Granting Vertex AI permissions for AI suggestions...${NC}"
+echo "Granting AI Platform User role to Compute service account..."
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:${COMPUTE_SA}" \
+  --role="roles/aiplatform.user" \
+  --condition=None \
+  > /dev/null 2>&1 || echo -e "${YELLOW}Note: Permission already exists or couldn't be set${NC}"
+
 echo -e "${GREEN}✓ Permissions granted${NC}"
 
 echo ""
@@ -96,8 +106,17 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}Setup Complete!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
+echo "Enabled APIs:"
+echo "  ✓ Cloud Run"
+echo "  ✓ Artifact Registry"
+echo "  ✓ Secret Manager"
+echo "  ✓ Cloud Build"
+echo "  ✓ Vertex AI (for AI-powered suggestions)"
+echo ""
 echo "Next steps:"
 echo "1. Create secrets: ./scripts/create-secrets.sh"
 echo "2. Build image: gcloud builds submit --config cloudbuild.yaml"
 echo "3. Deploy: ./scripts/deploy-gcp.sh"
+echo ""
+echo "Optional: Enable AI suggestions by setting AI_SUGGESTIONS_ENABLED=true during deployment"
 echo ""

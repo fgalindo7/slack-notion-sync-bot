@@ -236,7 +236,10 @@ if [ "$RUN_ALL" = true ] || [ "$RUN_GCP_SETUP" = true ]; then
     echo -e "${BLUE}Step 3: Initial GCP Setup${NC}"
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    echo "This will enable required APIs and create Artifact Registry..."
+    echo "This will enable required APIs and create infrastructure:"
+    echo "  • Cloud Run, Artifact Registry, Secret Manager, Cloud Build"
+    echo "  • Vertex AI (for AI-powered similar case suggestions)"
+    echo "  • IAM permissions for AI features"
     echo ""
     read -p "Continue? (y/n) " -n 1 -r
     echo ""

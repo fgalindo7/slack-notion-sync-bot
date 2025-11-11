@@ -308,6 +308,15 @@ Run linter:
 
 ```shell
 npm run lint
+npm run lint:fix  # Auto-fix issues
+```
+
+Run tests:
+
+```shell
+npm test                  # Run all tests
+npm run test:parser       # Parser tests only
+npm run test:validation   # Validation tests only
 ```
 
 Check syntax:

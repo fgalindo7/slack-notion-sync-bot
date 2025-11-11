@@ -226,7 +226,7 @@ gcloud run services logs read oncall-cat \
 - `ALLOW_THREADS=false`
 - `API_TIMEOUT=10000`
 - `SCHEMA_CACHE_TTL=3600000`
-- `HEALTH_PORT=3000`
+- `HEALTH_PORT=1987`
 - `PORT=1987`
 - `LOG_LEVEL=info`
 

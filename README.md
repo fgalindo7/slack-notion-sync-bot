@@ -157,7 +157,7 @@ The bot will auto-detect these columns by name. If neither exists, message updat
 | ALLOW_THREADS | Allow parsing inside threads (true/false, default: false) | ⚠️ Optional |
 | API_TIMEOUT | Timeout for API calls in ms (default: 10000) | ⚠️ Optional |
 | SCHEMA_CACHE_TTL | Schema cache TTL in ms (default: 3600000 = 1 hour) | ⚠️ Optional |
-| HEALTH_PORT | Port for health check server (default: 3000) | ⚠️ Optional |
+| HEALTH_PORT | Port for health check server (default: 1987) | ⚠️ Optional |
 | PORT | Port for main app (default: 1987) | ⚠️ Optional |
 | LOG_LEVEL | Logging level: trace, debug, info, warn, error (default: info) | ⚠️ Optional |
 
@@ -325,7 +325,7 @@ The bot exposes two HTTP endpoints for monitoring:
 ### Health Check Endpoint
 
 ```shell
-curl http://localhost:3000/health
+curl http://localhost:1987/health
 ```
 
 **Response (healthy):**
@@ -353,7 +353,7 @@ curl http://localhost:3000/health
 ### Metrics Endpoint
 
 ```shell
-curl http://localhost:3000/metrics
+curl http://localhost:1987/metrics
 ```
 
 Returns detailed metrics in JSON format with success rates and uptime.

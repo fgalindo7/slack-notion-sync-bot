@@ -1,14 +1,15 @@
 services:
   oncall-auto:
-    ports: []
+    ports:
+      - "1987:1987"
     build: .
     container_name: oncall-auto
     restart: unless-stopped
     env_file: .env
-    # No ports needed for Socket Mode; Slack connects out to Slack, and Slack to you via websockets.
-    # Health check endpoint is internal only (not exposed)
+    # Port 1987 exposed for health check endpoint
+    # Socket Mode: Slack connects via websockets (no inbound port needed for Slack)
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:1987/health || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3

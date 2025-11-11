@@ -113,7 +113,8 @@ Complete workflow for `./scripts/setup-and-deploy.sh` with multi-channel support
 ### Channel Mappings Handling
 
 **File Management:**
-```bash
+
+```shell
 # If channel-mappings.json exists
 → Show preview (first 20 lines)
 → Ask if user wants to edit
@@ -126,7 +127,8 @@ Complete workflow for `./scripts/setup-and-deploy.sh` with multi-channel support
 ```
 
 **Secret Manager Upload:**
-```bash
+
+```shell
 # Always uploads to Secret Manager after file is ready
 → Check if 'channel-mappings' secret exists
 
@@ -142,7 +144,8 @@ If new:
 ```
 
 **Deployment Configuration:**
-```bash
+
+```shell
 # Cloud Run receives:
 CHANNEL_DB_MAPPINGS=true
 CHANNEL_DB_MAPPINGS_FILE=/secrets/channel-mappings
@@ -169,14 +172,16 @@ CHANNEL_DB_MAPPINGS_FILE=/secrets/channel-mappings
 ### Channel Mappings Errors
 
 **File not ready:**
-```bash
+
+```shell
 # User hasn't edited the file
 → Script waits for user to press Enter
 → Allows time to edit externally
 ```
 
 **Secret upload fails:**
-```bash
+
+```shell
 # Invalid JSON or permission error
 → Show error message
 → Exit with status 1
@@ -184,7 +189,8 @@ CHANNEL_DB_MAPPINGS_FILE=/secrets/channel-mappings
 ```
 
 **Secret already exists:**
-```bash
+
+```shell
 # Previous deployment exists
 → Ask user if they want to update
 → Allows keeping existing config
@@ -196,7 +202,8 @@ CHANNEL_DB_MAPPINGS_FILE=/secrets/channel-mappings
 ### Second Run Behavior
 
 **Secrets already exist:**
-```bash
+
+```shell
 Step 4: Configure Secrets
 ✓ Required secrets already exist
 
@@ -206,7 +213,8 @@ Do you want to review/update secrets? (y/n)
 ```
 
 **Channel mappings exist:**
-```bash
+
+```shell
 Step 5: Configure Channels and Databases
 ✓ channel-mappings.json found
 
@@ -230,7 +238,7 @@ Do you want to update it with the current file? (y/n)
 
 ### Scenario 1: Fresh Deployment (Multi-Channel)
 
-```bash
+```shell
 ./scripts/setup-and-deploy.sh
 
 → Choose mode: 2 (multi-channel)
@@ -243,7 +251,7 @@ Do you want to update it with the current file? (y/n)
 
 ### Scenario 2: Update Channel Mappings
 
-```bash
+```shell
 # Edit your local file
 vim channel-mappings.json
 
@@ -259,7 +267,7 @@ vim channel-mappings.json
 
 ### Scenario 3: Update One Secret
 
-```bash
+```shell
 # Run create-secrets.sh directly
 ./scripts/create-secrets.sh
 

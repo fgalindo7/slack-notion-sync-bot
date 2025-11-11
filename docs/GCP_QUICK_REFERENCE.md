@@ -4,7 +4,7 @@ Quick command reference for deploying and managing On-Call Cat on Google Cloud P
 
 ## Initial Setup (One-Time)
 
-```bash
+```shell
 # Set environment variables
 export PROJECT_ID="your-gcp-project-id"
 export REGION="us-central1"
@@ -15,7 +15,7 @@ export REGION="us-central1"
 
 ## Manual Setup Steps
 
-```bash
+```shell
 # 1. Initial GCP setup
 ./scripts/setup-gcp.sh
 
@@ -37,7 +37,7 @@ export MULTI_CHANNEL=true
 
 ## Monitoring Commands
 
-```bash
+```shell
 # Check service health
 ./scripts/check-health.sh
 
@@ -58,7 +58,7 @@ gcloud run services describe oncall-cat \
 
 ## Update Commands
 
-```bash
+```shell
 # Update environment variables
 gcloud run services update oncall-cat \
   --region=$REGION \
@@ -80,7 +80,7 @@ gcloud run services update oncall-cat \
 
 ## Troubleshooting Commands
 
-```bash
+```shell
 # Check for errors in logs
 gcloud run services logs read oncall-cat \
   --region=$REGION \
@@ -109,7 +109,7 @@ gcloud run services delete oncall-cat --region=$REGION
 
 ## Secret Management
 
-```bash
+```shell
 # Create new secret
 echo -n "secret-value" | \
   gcloud secrets create SECRET_NAME --data-file=-
@@ -131,7 +131,7 @@ gcloud secrets versions disable VERSION_ID --secret=SECRET_NAME
 
 ## Cost Management
 
-```bash
+```shell
 # View current usage
 gcloud run services describe oncall-cat \
   --region=$REGION \
@@ -149,7 +149,7 @@ gcloud alpha billing projects describe $PROJECT_ID
 
 ## CI/CD Setup
 
-```bash
+```shell
 # Connect GitHub repository
 gcloud beta builds triggers create github \
   --repo-name=slack-notion-sync-bot \
@@ -169,7 +169,7 @@ gcloud builds list --limit=10
 
 ## Cleanup Commands
 
-```bash
+```shell
 # Delete Cloud Run service
 gcloud run services delete oncall-cat --region=$REGION
 
@@ -188,7 +188,7 @@ gcloud builds triggers delete TRIGGER_ID
 
 ## Useful Filters
 
-```bash
+```shell
 # Filter logs by message type
 gcloud run services logs read oncall-cat \
   --region=$REGION \
@@ -233,7 +233,7 @@ gcloud run services logs read oncall-cat \
 ## Cloud Run Configuration
 
 ### Recommended Settings
-```bash
+```shell
 --min-instances=1          # Keep Socket Mode connection alive
 --max-instances=3          # Prevent runaway costs
 --memory=512Mi             # Sufficient for most workloads
@@ -243,7 +243,7 @@ gcloud run services logs read oncall-cat \
 ```
 
 ### Performance Settings
-```bash
+```shell
 --memory=1Gi               # For high-volume channels
 --cpu=2                    # For faster processing
 --concurrency=80           # Default, adjust if needed

@@ -291,7 +291,7 @@ async function replyMissing({ client, channel, ts, fields, suffix = '' }) {
     `❗ *Missing Required Fields*\n\n` +
     `The following fields are required:\n${lines}\n\n` +
     `*How to fix:* Edit your original message and add the missing fields.\n` +
-    `Keep the trigger at the top (@auto, @cat, or @peepo).\n\n` +
+    `Keep the trigger at the top (@auto).\n\n` +
     `Example:\n` +
     `\`\`\`\n` +
     `@auto\n` +

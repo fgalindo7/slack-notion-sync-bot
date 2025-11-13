@@ -10,26 +10,16 @@
 #   - Proper IAM permissions for Cloud Build service account
 
 steps:
-  # Step 1: Build Docker image with build tag and latest tag
+  # Step 1: Build Docker image with latest tag
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
-      - '-t'
-      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/app:${_BUILD_TAG}'
       - '-t'
       - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/app:latest'
       - '.'
     id: 'build-image'
 
-  # Step 2: Push image with build tag
-  - name: 'gcr.io/cloud-builders/docker'
-    args:
-      - 'push'
-      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/app:${_BUILD_TAG}'
-    id: 'push-build-tag'
-    waitFor: ['build-image']
-
-  # Step 3: Push image with latest tag
+  # Step 2: Push image with latest tag
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
@@ -41,11 +31,9 @@ steps:
 substitutions:
   _REGION: us-central1
   _REPO_NAME: oncall-cat
-  _BUILD_TAG: ${COMMIT_SHA}
 
 # Images to be pushed to registry
 images:
-  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/app:${_BUILD_TAG}'
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/app:latest'
 
 # Build options

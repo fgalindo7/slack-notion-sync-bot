@@ -30,7 +30,7 @@ spec:
           env:
             - name: NODE_ENV
               value: production
-            - name: MULTI_CHANNEL
+            - name: CHANNEL_DB_MAPPINGS
               value: "true"
             - name: SLACK_BOT_TOKEN
               valueFrom:

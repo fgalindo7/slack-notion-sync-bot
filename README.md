@@ -329,9 +329,37 @@ node --check app.js
 
 ## Monitoring & Health Checks
 
-The bot exposes two HTTP endpoints for monitoring:
+### Enhanced Health Dashboard
 
-### Health Check Endpoint
+Check the complete system status with our comprehensive health dashboard:
+
+```shell
+npm run health        # Single run, all sections
+npm run health:watch  # Auto-refresh every 30s
+npm run health:json   # JSON output for automation
+```
+
+**Dashboard includes:**
+- **[APP]** Application health with real-time metrics and channel configuration
+- **[CR]** Cloud Run service status, scaling, and resources
+- **[CD]** Cloud Deploy pipeline state and rollout progress
+- **[CB]** Recent build history with success/failure tracking
+- **[GIT]** Version sync between local and deployed code
+
+**Features:**
+- Real Slack channel names (fetched via API)
+- Real Notion database titles
+- Success rate warnings (< 95%)
+- Smart URL truncation + terminal hyperlinks
+- Professional ASCII art icons
+
+See [docs/HEALTH_CHECKS.md](docs/HEALTH_CHECKS.md) for complete documentation.
+
+### HTTP Health Endpoints
+
+The bot also exposes direct HTTP endpoints:
+
+#### Health Check Endpoint
 
 ```shell
 curl http://localhost:1987/health
@@ -359,7 +387,7 @@ curl http://localhost:1987/health
 }
 ```
 
-### Metrics Endpoint
+#### Metrics Endpoint
 
 ```shell
 curl http://localhost:1987/metrics

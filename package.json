@@ -16,7 +16,10 @@
     "deploy:init": "node infrastructure/deploy-automation.mjs init",
     "deploy": "node infrastructure/deploy-automation.mjs deploy",
     "deploy:list": "node infrastructure/deploy-automation.mjs list",
-    "deploy:status": "node infrastructure/deploy-automation.mjs status"
+    "deploy:status": "node infrastructure/deploy-automation.mjs status",
+    "health": "node scripts/check-health.mjs",
+    "health:watch": "node scripts/check-health.mjs --watch",
+    "health:json": "node scripts/check-health.mjs --json"
   },
   "dependencies": {
     "@google-cloud/artifact-registry": "^4.3.1",
@@ -26,6 +29,7 @@
     "@google-cloud/service-management": "^3.2.1",
     "@notionhq/client": "^2.2.15",
     "@slack/bolt": "^3.18.0",
+    "boxen": "^8.0.1",
     "p-throttle": "^8.0.0",
     "p-timeout": "^7.0.1",
     "pino": "^10.1.0",

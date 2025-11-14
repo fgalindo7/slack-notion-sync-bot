@@ -181,12 +181,29 @@ gcloud deploy rollouts list \
 
 ### Health Checks
 
-```shell
-# Using existing health check script
-export PROJECT_ID=$GCP_PROJECT_ID
-./scripts/check-health.sh
+#### Enhanced Health Dashboard
 
-# Or query directly
+Use the comprehensive health check dashboard for real-time monitoring:
+
+```shell
+npm run health        # Single run, all sections
+npm run health:watch  # Auto-refresh every 30s
+npm run health:json   # JSON output for automation
+```
+
+**Dashboard shows:**
+- **[APP]** Application health, metrics, channel configuration
+- **[CR]** Cloud Run service details, scaling, resources
+- **[CD]** Cloud Deploy pipeline status, rollouts
+- **[CB]** Recent build history with success/failure tracking
+- **[GIT]** Version sync between local and deployed
+
+See [../docs/HEALTH_CHECKS.md](../docs/HEALTH_CHECKS.md) for complete documentation.
+
+#### Direct HTTP Endpoints
+
+```shell
+# Query service endpoints directly
 SERVICE_URL=$(gcloud run services describe oncall-cat \
   --region=us-central1 \
   --format='value(status.url)')

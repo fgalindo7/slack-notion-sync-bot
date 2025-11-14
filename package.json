@@ -11,9 +11,19 @@
     "test:parser": "node lib/parser.test.js",
     "test:validation": "node lib/validation.test.js",
     "test:coverage": "c8 --reporter=text --reporter=html --reporter=lcov npm test",
-    "test:coverage:check": "c8 --check-coverage --lines 75 --functions 60 --branches 60 npm test"
+    "test:coverage:check": "c8 --check-coverage --lines 75 --functions 60 --branches 60 npm test",
+    "infra:setup": "node infrastructure/setup-infrastructure.mjs",
+    "deploy:init": "node infrastructure/deploy-automation.mjs init",
+    "deploy": "node infrastructure/deploy-automation.mjs deploy",
+    "deploy:list": "node infrastructure/deploy-automation.mjs list",
+    "deploy:status": "node infrastructure/deploy-automation.mjs status"
   },
   "dependencies": {
+    "@google-cloud/artifact-registry": "^4.3.1",
+    "@google-cloud/cloudbuild": "^5.3.1",
+    "@google-cloud/deploy": "^5.2.1",
+    "@google-cloud/secret-manager": "^6.1.1",
+    "@google-cloud/service-management": "^3.2.1",
     "@notionhq/client": "^2.2.15",
     "@slack/bolt": "^3.18.0",
     "p-throttle": "^8.0.0",

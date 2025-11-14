@@ -224,7 +224,7 @@ Then create `channel-mappings.json` (see Configuration section above for format)
 npm start
 ```
 
-✅ You should see:
+You should see:
 ⚡️ On-Call Cat running (Socket Mode)
 
 ---
@@ -383,173 +383,57 @@ docker logs -f oncall-auto
 
 ### Google Cloud Platform (Cloud Run)
 
-Deploy to GCP Cloud Run for a production-ready, auto-scaling serverless environment.
+Deploy to GCP Cloud Run for production-ready, auto-scaling serverless deployment.
 
-#### Prerequisites
+#### 🚀 Quick Start
 
-```shell
-# Install gcloud SDK (macOS)
-brew install google-cloud-sdk
+**New users:** Follow the step-by-step guide in [GETTING_STARTED.md](GETTING_STARTED.md)
 
-# Authenticate and set project
-gcloud auth login
-gcloud config set project YOUR_PROJECT_ID
-
-# Enable required APIs
-gcloud services enable \
-  run.googleapis.com \
-  artifactregistry.googleapis.com \
-  secretmanager.googleapis.com \
-  cloudbuild.googleapis.com
-```
-
-#### Quick Deployment with Interactive Wizard
-
-The easiest way to deploy is using the interactive wizard that handles everything:
+**Already deployed?** Just push to main:
 
 ```shell
-# Full deployment wizard (all 8 steps)
-./scripts/setup-and-deploy.sh
-
-# Or run specific steps only
-./scripts/setup-and-deploy.sh --help
+git push origin main     # Auto-deploys to staging
 ```
 
-**Common scenarios:**
+**Benefits:**
+- Push to main → automatic build and deploy
+
+```
+**Features:**
+- Automated staging → production pipeline with approval gates
+- Infrastructure as code (no manual console configuration)
+- Docker builds with caching for fast deployments
+- Rollback support and release tracking
+
+**Documentation:**
+- [GETTING_STARTED.md](GETTING_STARTED.md) - First-time deployment checklist
+- [infrastructure/README.md](infrastructure/README.md) - Operations and reference
+- [infrastructure/QUICKSTART.md](infrastructure/QUICKSTART.md) - Quick commands
+
+---
+
+## Local Development
+
+Run locally with Docker:
 
 ```shell
-# Update secrets only
-./scripts/setup-and-deploy.sh --required-secrets
-
-# Rebuild and redeploy after code changes
-./scripts/setup-and-deploy.sh --build-image --deploy
-
-# Update channel mappings and redeploy
-./scripts/setup-and-deploy.sh --channels-and-dbs --deploy
+docker compose up -d
+docker logs -f oncall-auto
 ```
 
-See [Script Flags Reference](docs/SCRIPT_FLAGS.md) for all available options.
-
-#### Manual Deployment Steps
-
-**1. Store secrets in Secret Manager:**
+Or run directly with Node.js (requires environment variables):
 
 ```shell
-# Create secrets for credentials
-echo -n "xoxb-your-slack-bot-token" | \
-  gcloud secrets create slack-bot-token --data-file=-
-
-echo -n "xapp-your-slack-app-token" | \
-  gcloud secrets create slack-app-token --data-file=-
-
-echo -n "your-notion-token" | \
-  gcloud secrets create notion-token --data-file=-
-
-# For multi-channel mode
-cat channel-mappings.json | \
-  gcloud secrets create channel-mappings --data-file=-
+npm install
+npm start
 ```
 
-**2. Build and push Docker image:**
+### Other Deployment Platforms
 
-```shell
-# Create Artifact Registry repository
-gcloud artifacts repositories create oncall-cat \
-  --repository-format=docker \
-  --location=$REGION \
-  --description="On-Call Cat Docker images"
-
-# Submit build
-gcloud builds submit --config cloudbuild.yaml
-```
-
-**3. Deploy to Cloud Run:**
-
-```shell
-# Single-channel mode
-gcloud run deploy oncall-cat \
-  --image=${REGION}-docker.pkg.dev/${PROJECT_ID}/oncall-cat/app:latest \
-  --platform=managed \
-  --region=$REGION \
-  --min-instances=1 \
-  --max-instances=3 \
-  --memory=512Mi \
-  --cpu=1 \
-  --port=1987 \
-  --set-env-vars="CHANNEL_DB_MAPPINGS=false,ALLOW_THREADS=false,LOG_LEVEL=info" \
-  --set-secrets="SLACK_BOT_TOKEN=slack-bot-token:latest,SLACK_APP_LEVEL_TOKEN=slack-app-token:latest,NOTION_TOKEN=notion-token:latest" \
-  --set-env-vars="WATCH_CHANNEL_ID=C1234567890,NOTION_DATABASE_ID=abc123def456"
-
-# Multi-channel mode
-gcloud run deploy oncall-cat \
-  --image=${REGION}-docker.pkg.dev/${PROJECT_ID}/oncall-cat/app:latest \
-  --platform=managed \
-  --region=$REGION \
-  --min-instances=1 \
-  --max-instances=3 \
-  --memory=512Mi \
-  --cpu=1 \
-  --port=1987 \
-  --set-env-vars="CHANNEL_DB_MAPPINGS=true,LOG_LEVEL=info" \
-  --set-secrets="SLACK_BOT_TOKEN=slack-bot-token:latest,SLACK_APP_LEVEL_TOKEN=slack-app-token:latest,NOTION_TOKEN=notion-token:latest,/secrets/channel-mappings=channel-mappings:latest"
-```
-
-**4. Verify deployment:**
-
-```shell
-# Get service URL
-gcloud run services describe oncall-cat --region=$REGION --format='value(status.url)'
-
-# Check health
-curl $(gcloud run services describe oncall-cat --region=$REGION --format='value(status.url)')/health
-
-# View logs
-gcloud run services logs tail oncall-cat --region=$REGION
-```
-
-#### Important Configuration Notes
-
-- **`--min-instances=1`**: Required for Socket Mode (persistent Slack connection)
-- **`--memory=512Mi`**: Sufficient for most workloads
-- **`--timeout=300`**: 5-minute timeout for Notion API calls
-- **Estimated cost**: ~$15-25/month for 24/7 operation
-
-#### Updating Configuration
-
-```shell
-# Update environment variables
-gcloud run services update oncall-cat \
-  --region=$REGION \
-  --set-env-vars="LOG_LEVEL=debug"
-
-# Update secrets
-echo -n "new-token" | \
-  gcloud secrets versions add slack-bot-token --data-file=-
-
-# Rollback if needed
-gcloud run revisions list --service=oncall-cat --region=$REGION
-gcloud run services update-traffic oncall-cat \
-  --to-revisions=REVISION_NAME=100
-```
-
-#### CI/CD with GitHub
-
-```shell
-# Connect GitHub repository
-gcloud beta builds triggers create github \
-  --repo-name=slack-notion-sync-bot \
-  --repo-owner=fgalindo7 \
-  --branch-pattern="^main$" \
-  --build-config=cloudbuild.yaml
-```
-
-See `scripts/` directory for automation scripts and `cloudbuild.yaml` for build configuration.
-
-### Other Platforms
-
+- **Docker**: Use provided `Dockerfile` and `docker-compose.yml`
 - **Fly.io**: `fly launch` and configure secrets
-- **Railway.app**: Connect repo and set environment variables
-- **AWS ECS/Fargate**: Use provided Dockerfile
+- **Railway**: Connect repo and set environment variables
+- **AWS ECS**: Use Dockerfile with ECS/Fargate
 
 ---
 
@@ -565,29 +449,25 @@ on-call-cat/
 ├── manifest.json                 # Slack app manifest
 ├── channel-mappings.json.example # Example multi-channel config
 ├── docs/                         # Documentation
-│   ├── GCP_DEPLOYMENT.md        # Comprehensive GCP deployment guide
-│   ├── GCP_QUICK_REFERENCE.md   # Quick command reference
-│   ├── SETUP_FLOW.md            # Deployment wizard flow diagram
-│   └── SCRIPT_FLAGS.md          # Script flags and selective execution
-├── scripts/                      # Deployment automation scripts
-│   ├── setup-gcp.sh             # Initial GCP setup (APIs, registry)
-│   ├── create-secrets.sh        # Create secrets in Secret Manager
-│   ├── deploy-gcp.sh            # Deploy to Cloud Run
-│   ├── setup-and-deploy.sh      # Interactive deployment wizard
-│   ├── view-logs.sh             # View Cloud Run logs
-│   └── check-health.sh          # Check service health status
+│   ├── GCP_DEPLOYMENT.md         # Comprehensive GCP deployment guide
+│   ├── GCP_QUICK_REFERENCE.md    # Quick command reference
+│   ├── SETUP_FLOW.md             # Deployment wizard flow diagram
+│   └── SCRIPT_FLAGS.md           # Script flags and selective execution
+├── scripts/                      # Utility scripts
+│   ├── view-logs.sh              # View Cloud Run logs
+│   └── check-health.sh           # Check service health status
 ├── lib/                          # Modular components
-│   ├── config.js                # Centralized configuration & multi-channel routing
-│   ├── constants.js             # App-wide constants (defaults, regexes)
-│   ├── metrics.js               # BotMetrics class for tracking
-│   ├── parser.js                # Message parsing, email normalization, date parsing
-│   ├── parser.test.js           # Unit tests for parser functions
-│   ├── validation.js            # Field validation functions
-│   ├── validation.test.js       # Unit tests for validation functions
-│   └── schema-cache.js          # NotionSchemaCache class with TTL
+│   ├── config.js                 # Centralized configuration & multi-channel routing
+│   ├── constants.js              # App-wide constants (defaults, regexes)
+│   ├── metrics.js                # BotMetrics class for tracking
+│   ├── parser.js                 # Message parsing, email normalization, date parsing
+│   ├── parser.test.js            # Unit tests for parser functions
+│   ├── validation.js             # Field validation functions
+│   ├── validation.test.js        # Unit tests for validation functions
+│   └── schema-cache.js           # NotionSchemaCache class with TTL
 ├── logo/                         # Brand assets
-│   ├── on-call-cat.png          # Main logo
-│   └── on-call-cat-2.png        # Small logo variant
+│   ├── on-call-cat.png           # Main logo
+│   └── on-call-cat-2.png         # Small logo variant
 └── README.md                     # This file
 ```
 

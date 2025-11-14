@@ -1,0 +1,31 @@
+# Cloud Deploy Configuration for On-Call Cat
+# Defines the delivery pipeline and targets for automated deployments
+
+apiVersion: deploy.cloud.google.com/v1
+kind: DeliveryPipeline
+metadata:
+  name: oncall-cat-pipeline
+description: Automated deployment pipeline for On-Call Cat Slack bot
+serialPipeline:
+  stages:
+    - targetId: staging
+      profiles: [staging]
+    - targetId: production
+      profiles: [production]
+---
+apiVersion: deploy.cloud.google.com/v1
+kind: Target
+metadata:
+  name: staging
+description: Staging environment for On-Call Cat
+run:
+  location: projects/staging-383416/locations/us-central1
+---
+apiVersion: deploy.cloud.google.com/v1
+kind: Target
+metadata:
+  name: production
+description: Production environment for On-Call Cat
+requireApproval: true
+run:
+  location: projects/staging-383416/locations/us-central1

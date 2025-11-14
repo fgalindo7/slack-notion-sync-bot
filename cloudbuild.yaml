@@ -1,39 +1,62 @@
 # Cloud Build configuration for On-Call Cat
-# This file defines how to build and push the Docker image to Artifact Registry
+# This file defines how to build and deploy via Cloud Deploy
 # 
-# Usage:
-#   gcloud builds submit --config cloudbuild.yaml
+# Triggered automatically on push to main branch
 #
 # Prerequisites:
 #   - Artifact Registry repository created: oncall-cat
 #   - Cloud Build API enabled
+#   - Cloud Deploy API enabled
 #   - Proper IAM permissions for Cloud Build service account
 
 steps:
-  # Step 1: Build Docker image with latest tag
+  # Step 1: Build Docker image with BUILD_TIME
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
+      - '--build-arg'
+      - 'BUILD_TIME=$_BUILD_TIME'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/app:${SHORT_SHA}'
       - '-t'
       - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/app:latest'
       - '.'
     id: 'build-image'
 
-  # Step 2: Push image with latest tag
+  # Step 2: Push image with both tags
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'push'
-      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/app:latest'
-    id: 'push-latest'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/app'
+    id: 'push-images'
     waitFor: ['build-image']
+
+  # Step 3: Create Cloud Deploy release
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'deploy'
+      - 'releases'
+      - 'create'
+      - 'release-${SHORT_SHA}'
+      - '--delivery-pipeline=${_PIPELINE_NAME}'
+      - '--region=${_REGION}'
+      - '--images=oncall-cat=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/app:${SHORT_SHA}'
+      - '--skaffold-file=skaffold.yaml'
+    id: 'create-release'
+    waitFor: ['push-images']
 
 # Substitution variables (can be overridden at build time)
 substitutions:
   _REGION: us-central1
   _REPO_NAME: oncall-cat
+  _PIPELINE_NAME: oncall-cat-pipeline
+  _BUILD_TIME: '$_BUILD_TIME'
 
 # Images to be pushed to registry
 images:
+  - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/app:${SHORT_SHA}'
   - '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/app:latest'
 
 # Build options

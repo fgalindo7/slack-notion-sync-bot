@@ -1,0 +1,35 @@
+# Skaffold Configuration for On-Call Cat
+# Defines build and deployment configuration for Cloud Deploy
+
+apiVersion: skaffold/v4beta6
+kind: Config
+metadata:
+  name: oncall-cat
+build:
+  artifacts:
+    - image: oncall-cat
+      docker:
+        dockerfile: Dockerfile
+        buildArgs:
+          BUILD_TIME: "{{.BUILD_TIME}}"
+  googleCloudBuild:
+    projectId: staging-383416
+    region: us-central1
+deploy:
+  cloudrun:
+    projectid: staging-383416
+    region: us-central1
+profiles:
+  - name: staging
+    deploy:
+      cloudrun:
+        projectid: staging-383416
+        region: us-central1
+  - name: production
+    deploy:
+      cloudrun:
+        projectid: staging-383416
+        region: us-central1
+manifests:
+  rawYaml:
+    - service.yaml

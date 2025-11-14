@@ -408,7 +408,6 @@ git push origin main     # Auto-deploys to staging
 **Documentation:**
 - [GETTING_STARTED.md](GETTING_STARTED.md) - First-time deployment checklist
 - [infrastructure/README.md](infrastructure/README.md) - Operations and reference
-- [infrastructure/QUICKSTART.md](infrastructure/QUICKSTART.md) - Quick commands
 
 ---
 

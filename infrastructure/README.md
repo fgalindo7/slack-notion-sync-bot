@@ -422,7 +422,6 @@ Gradually roll out changes:
 ### Project Documentation
 
 - [GETTING_STARTED.md](../GETTING_STARTED.md) - Step-by-step deployment checklist
-- [QUICKSTART.md](QUICKSTART.md) - Quick command reference
 - [Main README](../README.md) - Project overview
 - [AGENTS.md](../AGENTS.md) - AI-assisted development guide
 

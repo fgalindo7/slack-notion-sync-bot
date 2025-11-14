@@ -128,7 +128,6 @@ Promote to production via the [Cloud Deploy Console](https://console.cloud.googl
 ### Next Steps
 
 - **Operations Guide:** [infrastructure/README.md](infrastructure/README.md)
-- **Command Reference:** [infrastructure/QUICKSTART.md](infrastructure/QUICKSTART.md)
 - **Monitoring:** Use `./scripts/check-health.sh` and `./scripts/view-logs.sh`
 
 ## Common Issues
@@ -148,7 +147,6 @@ Promote to production via the [Cloud Deploy Console](https://console.cloud.googl
 ## Need Help?
 
 - **Detailed docs:** [infrastructure/README.md](infrastructure/README.md)
-- **Quick commands:** [infrastructure/QUICKSTART.md](infrastructure/QUICKSTART.md)
 - **Issues:** [GitHub Issues](https://github.com/fgalindo7/slack-notion-sync-bot/issues)
 
 ---

@@ -933,10 +933,11 @@ const healthServer = http.createServer((req, res) => {
   if (req.url === '/health' || req.url === '/') {
     const now = Date.now();
     const timeSinceActivity = now - lastActivityTime;
-    const maxIdleTime = 300000; // 5 minutes
     const uptime = process.uptime();
     
-    if (isHealthy && timeSinceActivity < maxIdleTime) {
+    // Bot is healthy if Slack Socket Mode connection is established
+    // Message activity is not required - bot can be idle waiting for messages
+    if (isHealthy) {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ 
         status: 'healthy', 
@@ -944,6 +945,7 @@ const healthServer = http.createServer((req, res) => {
         buildTime: BUILD_TIME,
         uptime,
         lastActivity: new Date(lastActivityTime).toISOString(),
+        idleTimeSeconds: Math.floor(timeSinceActivity / 1000),
         metrics: metrics.toJSON()
       }));
     } else {
@@ -952,7 +954,7 @@ const healthServer = http.createServer((req, res) => {
         status: 'unhealthy',
         version: APP_VERSION,
         buildTime: BUILD_TIME,
-        reason: !isHealthy ? 'not_ready' : 'no_recent_activity',
+        reason: 'not_ready',
         uptime,
         metrics: metrics.toJSON()
       }));

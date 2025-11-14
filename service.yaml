@@ -37,7 +37,7 @@ spec:
                 secretKeyRef:
                   key: latest
                   name: slack-bot-token
-            - name: SLACK_APP_TOKEN
+            - name: SLACK_APP_LEVEL_TOKEN
               valueFrom:
                 secretKeyRef:
                   key: latest

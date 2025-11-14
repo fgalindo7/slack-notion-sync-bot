@@ -25,5 +25,8 @@ COPY channel-mappings.json.example ./channel-mappings.json
 RUN addgroup -S app && adduser -S app -G app
 USER app
 
+# Set build timestamp (can be overridden at build time)
+ARG BUILD_TIME=unknown
+ENV BUILD_TIME=${BUILD_TIME}
 ENV PORT=1987
 CMD ["node", "app.js"]

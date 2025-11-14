@@ -12,6 +12,12 @@ import pino from 'pino';
 import pThrottle from 'p-throttle';
 import pTimeout from 'p-timeout';
 import http from 'http';
+import { readFileSync } from 'fs';
+
+// Read version from package.json
+const packageJson = JSON.parse(readFileSync('./package.json', 'utf8'));
+const APP_VERSION = packageJson.version;
+const BUILD_TIME = process.env.BUILD_TIME || 'unknown';
 
 // Import local modules
 import { getConfig, getDatabaseIdForChannel } from './lib/config.js';
@@ -934,6 +940,8 @@ const healthServer = http.createServer((req, res) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ 
         status: 'healthy', 
+        version: APP_VERSION,
+        buildTime: BUILD_TIME,
         uptime,
         lastActivity: new Date(lastActivityTime).toISOString(),
         metrics: metrics.toJSON()
@@ -942,6 +950,8 @@ const healthServer = http.createServer((req, res) => {
       res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ 
         status: 'unhealthy',
+        version: APP_VERSION,
+        buildTime: BUILD_TIME,
         reason: !isHealthy ? 'not_ready' : 'no_recent_activity',
         uptime,
         metrics: metrics.toJSON()

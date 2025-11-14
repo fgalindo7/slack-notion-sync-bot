@@ -56,3 +56,40 @@ if [ "$STATUS" = "healthy" ]; then
 else
     echo -e "${RED}✗ Service is unhealthy${NC}"
 fi
+
+# Check deployed version/build time
+DEPLOYED_BUILD_TIME=$(echo "$HEALTH_RESPONSE" | jq -r '.buildTime' 2>/dev/null)
+DEPLOYED_VERSION=$(echo "$HEALTH_RESPONSE" | jq -r '.version' 2>/dev/null)
+
+if [ "$DEPLOYED_BUILD_TIME" != "null" ] && [ "$DEPLOYED_BUILD_TIME" != "unknown" ]; then
+    # Get the latest local git commit info
+    LATEST_COMMIT=$(git log -1 --format='%H %ai' 2>/dev/null || echo "unknown")
+    
+    echo -e "${BLUE}Deployed version:${NC} $DEPLOYED_VERSION (built at $DEPLOYED_BUILD_TIME)"
+    
+    # Get current revision's creation time from Cloud Run
+    CURRENT_REVISION=$(gcloud run services describe $SERVICE_NAME --region=$REGION --format='value(status.latestReadyRevisionName)' 2>/dev/null)
+    REVISION_CREATE_TIME=$(gcloud run revisions describe $CURRENT_REVISION --region=$REGION --format='value(metadata.creationTimestamp)' 2>/dev/null)
+    
+    if [ -n "$LATEST_COMMIT" ] && [ "$LATEST_COMMIT" != "unknown" ]; then
+        COMMIT_TIME=$(echo "$LATEST_COMMIT" | awk '{print $2, $3, $4}')
+        COMMIT_HASH=$(echo "$LATEST_COMMIT" | awk '{print substr($1,1,7)}')
+        echo -e "${BLUE}Latest local commit:${NC} $COMMIT_HASH at $COMMIT_TIME"
+        
+        # Convert times to epoch for comparison
+        DEPLOYED_EPOCH=$(date -j -f "%Y-%m-%dT%H:%M:%SZ" "$DEPLOYED_BUILD_TIME" +%s 2>/dev/null || echo "0")
+        COMMIT_EPOCH=$(date -j -f "%Y-%m-%d %H:%M:%S %z" "$COMMIT_TIME" +%s 2>/dev/null || echo "0")
+        
+        # If deployed time is after commit time (with 60 second buffer), it's current
+        TIME_DIFF=$((DEPLOYED_EPOCH - COMMIT_EPOCH))
+        
+        if [ $TIME_DIFF -ge -60 ]; then
+            echo -e "${GREEN}✓ Service is running the latest deployment${NC}"
+        else
+            echo -e "${RED}⚠ Service may be running an older deployment${NC}"
+            echo -e "${RED}  Deployed build is $((-TIME_DIFF)) seconds older than latest commit${NC}"
+        fi
+    fi
+else
+    echo -e "${RED}⚠ Unable to determine deployment version${NC}"
+fi

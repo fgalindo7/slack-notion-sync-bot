@@ -379,24 +379,41 @@ async function setupIAMPermissions() {
   log('  • Cloud Build service account needs:', 'blue');
   log('    - roles/run.admin', 'blue');
   log('    - roles/iam.serviceAccountUser', 'blue');
-  log('  • Cloud Run service account needs:', 'blue');
+  log('  • Cloud Run service account (compute SA) needs:', 'blue');
   log('    - roles/secretmanager.secretAccessor', 'blue');
   log('    - roles/aiplatform.user', 'blue');
+  log('    - roles/clouddeploy.releaser (for Cloud Deploy)', 'blue');
+  log('    - roles/iam.serviceAccountUser (ActAs permission for Cloud Deploy)', 'blue');
   
   log('\nRun these commands to grant permissions:', 'bright');
   log(`  PROJECT_NUMBER=$(gcloud projects describe ${CONFIG.projectId} --format='value(projectNumber)')`, 'bright');
+  log('', 'reset');
+  log('  # Cloud Build service account permissions', 'bright');
   log(`  gcloud projects add-iam-policy-binding ${CONFIG.projectId} \\`, 'bright');
   log(`    --member="serviceAccount:\${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \\`, 'bright');
   log(`    --role="roles/run.admin"`, 'bright');
   log(`  gcloud projects add-iam-policy-binding ${CONFIG.projectId} \\`, 'bright');
   log(`    --member="serviceAccount:\${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \\`, 'bright');
   log(`    --role="roles/iam.serviceAccountUser"`, 'bright');
+  log('', 'reset');
+  log('  # Cloud Run compute service account permissions', 'bright');
   log(`  gcloud projects add-iam-policy-binding ${CONFIG.projectId} \\`, 'bright');
   log(`    --member="serviceAccount:\${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \\`, 'bright');
   log(`    --role="roles/secretmanager.secretAccessor"`, 'bright');
   log(`  gcloud projects add-iam-policy-binding ${CONFIG.projectId} \\`, 'bright');
   log(`    --member="serviceAccount:\${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \\`, 'bright');
   log(`    --role="roles/aiplatform.user"`, 'bright');
+  log('', 'reset');
+  log('  # Cloud Deploy permissions (REQUIRED for automated deployments)', 'bright');
+  log(`  gcloud projects add-iam-policy-binding ${CONFIG.projectId} \\`, 'bright');
+  log(`    --member="serviceAccount:\${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \\`, 'bright');
+  log(`    --role="roles/clouddeploy.releaser"`, 'bright');
+  log('', 'reset');
+  log('  # ActAs permission (allows compute SA to impersonate itself for Cloud Deploy)', 'bright');
+  log(`  gcloud iam service-accounts add-iam-policy-binding \\`, 'bright');
+  log(`    \${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \\`, 'bright');
+  log(`    --member="serviceAccount:\${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \\`, 'bright');
+  log(`    --role="roles/iam.serviceAccountUser"`, 'bright');
 }
 
 /**

@@ -51,9 +51,43 @@ The script will enable APIs, create repositories, and prompt for secrets.
 
 ## ✓ Step 5: Grant IAM Permissions
 
-Copy and run the IAM commands displayed by the setup script. They grant Cloud Build permission to deploy and Cloud Run permission to access secrets.
+Copy and run the IAM commands displayed by the setup script. They grant Cloud Build permission to deploy, Cloud Run permission to access secrets, and Cloud Deploy permissions for automated deployments.
 
-> **See the full commands in:** [infrastructure/README.md - Step 4](infrastructure/README.md#step-4-grant-iam-permissions)
+```shell
+# Get your project number
+PROJECT_NUMBER=$(gcloud projects describe $GCP_PROJECT_ID --format='value(projectNumber)')
+
+# Cloud Build service account permissions
+gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
+  --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
+  --role="roles/run.admin"
+
+gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
+  --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
+  --role="roles/iam.serviceAccountUser"
+
+# Cloud Run compute service account permissions
+gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+
+gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/aiplatform.user"
+
+# Cloud Deploy permissions (REQUIRED for automated deployments)
+gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/clouddeploy.releaser"
+
+# ActAs permission (allows compute SA to impersonate itself for Cloud Deploy)
+gcloud iam service-accounts add-iam-policy-binding \
+  ${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/iam.serviceAccountUser"
+```
+
+> **See detailed explanations in:** [infrastructure/README.md - Step 4](infrastructure/README.md#step-4-grant-iam-permissions)
 
 ## ✓ Step 6: Connect GitHub Repository
 

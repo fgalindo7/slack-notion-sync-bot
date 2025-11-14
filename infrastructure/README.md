@@ -225,13 +225,103 @@ gcloud run services update-traffic oncall-cat \
   --to-revisions=oncall-cat-00010-abc=100
 ```
 
+## Required IAM Permissions
+
+The following IAM permissions are required for the automated deployment pipeline to function correctly:
+
+### Cloud Build Service Account
+
+The Cloud Build service account (`PROJECT_NUMBER@cloudbuild.gserviceaccount.com`) needs:
+
+- **`roles/run.admin`** - Deploy and manage Cloud Run services
+- **`roles/iam.serviceAccountUser`** - Act as other service accounts
+
+### Cloud Run Compute Service Account
+
+The default compute service account (`PROJECT_NUMBER-compute@developer.gserviceaccount.com`) needs:
+
+- **`roles/secretmanager.secretAccessor`** - Access secrets from Secret Manager
+- **`roles/aiplatform.user`** - Use Vertex AI services
+- **`roles/clouddeploy.releaser`** - Create and manage Cloud Deploy releases
+- **`roles/iam.serviceAccountUser`** - ActAs permission for Cloud Deploy operations
+
+### Grant All Permissions
+
+```shell
+# Get your project number
+PROJECT_NUMBER=$(gcloud projects describe $GCP_PROJECT_ID --format='value(projectNumber)')
+
+# Cloud Build service account permissions
+gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
+  --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
+  --role="roles/run.admin"
+
+gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
+  --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
+  --role="roles/iam.serviceAccountUser"
+
+# Cloud Run compute service account permissions
+gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+
+gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/aiplatform.user"
+
+# Cloud Deploy permissions (REQUIRED for automated deployments)
+gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/clouddeploy.releaser"
+
+# ActAs permission (allows compute SA to impersonate itself for Cloud Deploy)
+gcloud iam service-accounts add-iam-policy-binding \
+  ${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
+  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --role="roles/iam.serviceAccountUser"
+```
+
+### Why These Permissions Are Needed
+
+| Permission | Service Account | Purpose |
+|------------|----------------|---------|
+| `roles/run.admin` | Cloud Build | Deploy and update Cloud Run services |
+| `roles/iam.serviceAccountUser` | Cloud Build | Allows Cloud Build to deploy as Cloud Run SA |
+| `roles/secretmanager.secretAccessor` | Compute (Cloud Run) | Access Slack and Notion tokens from secrets |
+| `roles/aiplatform.user` | Compute (Cloud Run) | Use Vertex AI for embeddings and ML features |
+| `roles/clouddeploy.releaser` | Compute (Cloud Run) | Create Cloud Deploy releases from Cloud Build |
+| `roles/iam.serviceAccountUser` | Compute (self) | Allow compute SA to impersonate itself (ActAs) for Cloud Deploy |
+
+### Verify Permissions
+
+```shell
+# Check Cloud Build SA permissions
+gcloud projects get-iam-policy $GCP_PROJECT_ID \
+  --flatten="bindings[].members" \
+  --filter="bindings.members:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com"
+
+# Check compute SA permissions
+gcloud projects get-iam-policy $GCP_PROJECT_ID \
+  --flatten="bindings[].members" \
+  --filter="bindings.members:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+
+# Check ActAs permission
+gcloud iam service-accounts get-iam-policy \
+  ${PROJECT_NUMBER}-compute@developer.gserviceaccount.com
+```
+
 ## Troubleshooting
 
 ### Common Issues
 
-**Issue: "Permission denied" errors**
-- **Solution**: Ensure IAM permissions are granted (Step 4)
+**Issue: "Permission denied" errors during deployment**
+- **Solution**: Ensure all IAM permissions are granted (see [Required IAM Permissions](#required-iam-permissions) above)
 - **Check**: `gcloud projects get-iam-policy $GCP_PROJECT_ID`
+- **Common missing permissions**: `roles/clouddeploy.releaser` and ActAs permission
+
+**Issue: "ACTAS_PERMISSION_DENIED" in Cloud Build logs**
+- **Solution**: Grant ActAs permission to compute service account (see commands above)
+- **Cause**: Compute SA cannot impersonate itself for Cloud Deploy operations
 
 **Issue: "API not enabled"**
 - **Solution**: Run `npm run infra:setup` again

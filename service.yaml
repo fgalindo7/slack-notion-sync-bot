@@ -28,8 +28,6 @@ spec:
             - name: http1
               containerPort: 1987
           env:
-            - name: PORT
-              value: "1987"
             - name: NODE_ENV
               value: production
             - name: MULTI_CHANNEL

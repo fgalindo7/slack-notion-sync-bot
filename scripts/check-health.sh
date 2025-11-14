@@ -16,8 +16,8 @@ if [ -z "$REGION" ]; then
     export REGION="us-central1"
 fi
 
-if [ -z "$PROJECT_ID" ]; then
-    echo -e "${RED}Error: PROJECT_ID not set${NC}"
+if [ -z "$GCP_PROJECT_ID" ]; then
+    echo -e "${RED}Error: GCP_PROJECT_ID not set${NC}"
     exit 1
 fi
 

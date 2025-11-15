@@ -22,8 +22,8 @@ npm run health
 # Watch mode (auto-refresh every 30s)
 npm run health:watch
 
-# JSON output (for automation)
-npm run health:json
+# JSON output (for automation - use --silent to suppress npm output)
+npm run health:json --silent
 ```
 
 ### Custom Options

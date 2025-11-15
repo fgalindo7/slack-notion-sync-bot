@@ -629,9 +629,9 @@ function renderCloudBuild(info) {
     
     const duration = formatDuration(build.duration);
     const time = formatShortDate(build.createTime);
-    const trigger = build.triggerName === 'TRIGGER' ? `${colors.green}[TRIGGER]${colors.reset}` : `${colors.gray}[MANUAL]${colors.reset}`;
+    const trigger = build.triggerName === 'TRIGGER' ? `${colors.green}[T]${colors.reset}` : `${colors.gray}[M]${colors.reset}`;
     
-    content.push(` ${i + 1}. ${statusIcon} ${build.id} (${duration}) - ${build.commitSha} - ${trigger} ${time}`);
+    content.push(` ${i + 1}. ${statusIcon} ${build.id} (${duration}) ${build.commitSha} ${trigger} ${time}`);
   }
   
   const consoleUrl = `https://console.cloud.google.com/cloud-build/builds?project=${CONFIG.projectId}`;
@@ -696,15 +696,17 @@ async function renderDashboard() {
     console.clear();
   }
   
-  // ASCII art cat logo
-  const catLogo = [
-    '       /\\_/\\  ',
-    '      ( o.o ) ',
-    '       > ^ <  ',
-  ];
-  
-  console.log('');
-  catLogo.forEach(line => console.log(`  ${colors.cyan}${line}${colors.reset}`));
+  // ASCII art cat logo (only in dashboard mode)
+  if (!flags.json) {
+    const catLogo = [
+      '       /\\_/\\  ',
+      '      ( o.o ) ',
+      '       > ^ <  ',
+    ];
+    
+    console.log('');
+    catLogo.forEach(line => console.log(`  ${colors.cyan}${line}${colors.reset}`));
+  }
   
   // Fetch all data
   const [health, cloudRun, cloudDeploy, cloudBuild, git] = await Promise.all([

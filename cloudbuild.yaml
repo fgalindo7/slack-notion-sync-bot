@@ -52,7 +52,7 @@ substitutions:
   _REGION: us-central1
   _REPO_NAME: oncall-cat
   _PIPELINE_NAME: oncall-cat-pipeline
-  _BUILD_TIME: '$_BUILD_TIME'
+  _BUILD_TIME: '$(date -u +%Y-%m-%dT%H:%M:%SZ)'
 
 # Images to be pushed to registry
 images:

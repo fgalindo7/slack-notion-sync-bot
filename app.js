@@ -435,9 +435,18 @@ app.event('message', async ({ event, client }) => {
     // Update last activity time for health check
     lastActivityTime = Date.now();
     
-    // Ignore most non-user-generated subtypes; allow edits and thread broadcasts
+    // Log inbound event summary (helps diagnose subtype-related issues)
+    logger.debug({
+      type: 'message',
+      subtype: event.subtype || null,
+      channel: event.channel || null,
+      hasText: !!event.text,
+      hasInnerMessage: !!event.message
+    }, 'Received Slack event');
+
+    // Ignore most non-user-generated subtypes; allow edits, thread broadcasts, and thread replies
     if (event.subtype) {
-      const allowed = new Set(['message_changed', 'thread_broadcast']);
+      const allowed = new Set(['message_changed', 'thread_broadcast', 'message_replied']);
       if (!allowed.has(event.subtype)) {
         logger.debug({ subtype: event.subtype }, 'Skipping unsupported message subtype');
         return;
@@ -454,11 +463,19 @@ app.event('message', async ({ event, client }) => {
       return;
     }
 
+    // Normalize message fields for fresh message path (supports message_replied)
+    const effective = event.subtype === 'message_replied' && event.message ? event.message : event;
+    const text = effective.text || '';
+    const ts = effective.ts || event.ts;
+    const thread_ts = effective.thread_ts || event.thread_ts;
+    const user = effective.user || event.user;
+
     // Fresh message path
-    const trigger = getTrigger(event.text);
+    const trigger = getTrigger(text);
     if (!trigger) { return; }
     const suffix = suffixForTrigger(trigger);
-    if (!config.slack.allowThreads && !isTopLevel(event)) { 
+    const isTop = !(thread_ts && thread_ts !== ts);
+    if (!config.slack.allowThreads && !isTop) { 
       return; 
     }
 
@@ -466,18 +483,18 @@ app.event('message', async ({ event, client }) => {
     logger.info({ 
       trigger, 
       channel: event.channel, 
-      user: event.user,
+      user,
       metricsTotal: metrics.get('messagesProcessed')
     }, 'Processing message');
 
-    const parsed = parseAutoBlock(event.text || '');
+    const parsed = parseAutoBlock(text || '');
     const miss = missingFields(parsed);
     const issues = typeIssues(parsed);
 
     const { permalink = '' } = await withTimeout(
       client.chat.getPermalink({
         channel: event.channel,
-        message_ts: event.ts
+        message_ts: ts
       }).then(r => r || {}),
       API_TIMEOUT,
       'Slack getPermalink'
@@ -486,28 +503,28 @@ app.event('message', async ({ event, client }) => {
     if (miss.length) {
       metrics.increment('validationErrors');
       logger.warn({ missingFields: miss, channel: event.channel }, 'Validation failed: missing fields');
-      await replyMissing({ client, channel: event.channel, ts: event.ts, fields: miss, suffix });
+      await replyMissing({ client, channel: event.channel, ts, fields: miss, suffix });
       return;
     }
 
     if (issues.length) {
       metrics.increment('validationErrors');
       logger.warn({ issues, channel: event.channel }, 'Validation failed: type issues');
-      await replyInvalid({ client, channel: event.channel, ts: event.ts, issues, suffix });
+      await replyInvalid({ client, channel: event.channel, ts, issues, suffix });
       return;
     }
 
-    const { mention: reporterMention, notionId: reporterNotionId } = await resolveNotionPersonForSlackUser(event.user, client);
+    const { mention: reporterMention, notionId: reporterNotionId } = await resolveNotionPersonForSlackUser(user, client);
 
     // Use TS-based lookup to avoid duplicates, then upsert (write TS + permalink)
-    const existing = await findPageForMessage({ slackTs: event.ts, permalink, databaseId });
+    const existing = await findPageForMessage({ slackTs: ts, permalink, databaseId });
     const isUpdate = !!existing;
     
     try {
       const { url } = await createOrUpdateNotionPage({
         parsed,
         permalink,
-        slackTs: event.ts,
+        slackTs: ts,
         reporterMention,
         reporterNotionId,
         pageId: existing?.id,
@@ -531,10 +548,10 @@ app.event('message', async ({ event, client }) => {
         }, 'Notion page created');
       }
       
-      await replyCreated({ client, channel: event.channel, ts: event.ts, pageUrl: url, parsed, suffix, databaseId });
+      await replyCreated({ client, channel: event.channel, ts, pageUrl: url, parsed, suffix, databaseId });
     } catch (err) {
       if (isNotionPermError(err)) {
-        await notifyNotionPerms({ client, channel: event.channel, ts: event.ts, suffix, databaseId });
+        await notifyNotionPerms({ client, channel: event.channel, ts, suffix, databaseId });
         return;
       }
       if (err.name === 'TimeoutError') {
@@ -543,12 +560,12 @@ app.event('message', async ({ event, client }) => {
         logger.error({ 
           error: err.message, 
           channel: event.channel, 
-          ts: event.ts,
+          ts,
           metricsTimeouts: metrics.get('apiTimeouts')
         }, 'API timeout');
         await client.chat.postMessage({
           channel: event.channel,
-          thread_ts: event.ts,
+          thread_ts: ts,
           text: `⚠️ Request timed out. Please try again in a moment.${suffix}`
         }).catch(() => {}); // Ignore errors in error handler
         return;

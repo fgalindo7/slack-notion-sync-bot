@@ -435,27 +435,33 @@ app.event('message', async ({ event, client }) => {
     // Update last activity time for health check
     lastActivityTime = Date.now();
     
-    // Log inbound event summary (helps diagnose subtype-related issues)
-    logger.debug({
+    // Log inbound event summary at info for live diagnostics
+    logger.info({
       type: 'message',
       subtype: event.subtype || null,
       channel: event.channel || null,
+      thread_ts: event.thread_ts || null,
+      ts: event.ts || null,
+      user: event.user || null,
       hasText: !!event.text,
       hasInnerMessage: !!event.message
-    }, 'Received Slack event');
+    }, 'Inbound Slack event');
 
     // Ignore most non-user-generated subtypes; allow edits, thread broadcasts, and thread replies
     if (event.subtype) {
       const allowed = new Set(['message_changed', 'thread_broadcast', 'message_replied']);
       if (!allowed.has(event.subtype)) {
-        logger.debug({ subtype: event.subtype }, 'Skipping unsupported message subtype');
+        logger.info({ subtype: event.subtype, channel: event.channel }, 'Skipping unsupported message subtype');
         return;
       }
     }
     
     // Check if this channel is monitored and get its database ID
     const databaseId = getDatabaseIdForChannel(event.channel);
-    if (!databaseId) {return;} // Channel not monitored
+    if (!databaseId) {
+      logger.info({ channel: event.channel }, 'Ignoring event: channel not monitored');
+      return;
+    }
 
     // Handle edits (message_changed) separately
     if (event.subtype === 'message_changed') {
@@ -475,8 +481,9 @@ app.event('message', async ({ event, client }) => {
     if (!trigger) { return; }
     const suffix = suffixForTrigger(trigger);
     const isTop = !(thread_ts && thread_ts !== ts);
-    if (!config.slack.allowThreads && !isTop) { 
-      return; 
+    if (!config.slack.allowThreads && !isTop) {
+      logger.info({ channel: event.channel, ts, thread_ts }, 'Ignoring threaded message because allowThreads=false');
+      return;
     }
 
     metrics.increment('messagesProcessed');

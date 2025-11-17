@@ -751,19 +751,21 @@ async function renderDashboard() {
   }
   
   // Fetch all data
-  const [health, cloudRun, cloudDeploy, cloudBuild, git] = await Promise.all([
+  const [healthRes, cloudRun, cloudDeploy, cloudBuild, git] = await Promise.all([
     fetchAppHealth(),
     fetchCloudRunInfo(),
     fetchCloudDeployInfo(),
     fetchCloudBuildInfo(),
     fetchGitInfo(),
   ]);
+  const health = healthRes && healthRes.ok ? healthRes.json : { status: 'unhealthy', error: healthRes?.error || 'unknown' };
   
   const mappings = loadChannelMappings();
   
   // JSON output mode
   if (flags.json) {
-    console.log(JSON.stringify({ health, cloudRun, cloudDeploy, cloudBuild, git, mappings }, null, 2));
+    // Preserve existing JSON shape by returning the raw health fetch result
+    console.log(JSON.stringify({ health: healthRes, cloudRun, cloudDeploy, cloudBuild, git, mappings }, null, 2));
     return;
   }
   

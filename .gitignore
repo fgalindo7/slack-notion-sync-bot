@@ -6,3 +6,8 @@ channel-mappings.json
 coverage/
 .nyc_output/
 .c8/
+
+
+# GCP
+.gcloud/
+.gcloud-default/

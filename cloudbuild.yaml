@@ -16,6 +16,8 @@ steps:
     args:
       - '-c'
       - |
+        # Ensure placeholder channel-mappings.json exists if not provided (for Docker COPY)
+        [ -f channel-mappings.json ] || echo '{"databases":[]}' > channel-mappings.json
         docker build \
           --build-arg BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
           -t ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/app:${SHORT_SHA} \

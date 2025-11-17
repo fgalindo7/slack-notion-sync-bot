@@ -435,8 +435,14 @@ app.event('message', async ({ event, client }) => {
     // Update last activity time for health check
     lastActivityTime = Date.now();
     
-    // Ignore non-user-generated subtypes except edits (handled below)
-    if (event.subtype && event.subtype !== 'message_changed') {return;}
+    // Ignore most non-user-generated subtypes; allow edits and thread broadcasts
+    if (event.subtype) {
+      const allowed = new Set(['message_changed', 'thread_broadcast']);
+      if (!allowed.has(event.subtype)) {
+        logger.debug({ subtype: event.subtype }, 'Skipping unsupported message subtype');
+        return;
+      }
+    }
     
     // Check if this channel is monitored and get its database ID
     const databaseId = getDatabaseIdForChannel(event.channel);

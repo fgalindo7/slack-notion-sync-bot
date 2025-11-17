@@ -6,6 +6,8 @@ The `setup-and-deploy.sh` script supports selective execution of specific steps 
 
 By default, running `./scripts/setup-and-deploy.sh` executes the full wizard (all 8 steps). Use flags to run only specific steps.
 
+> **Heads-up:** This legacy Bash wrapper is in the process of being replaced by a new JavaScript-based deployment utility. Keep using these flags for now, but note that we need to circle back and refresh this document once the JS script fully takes over.
+
 ## Available Flags
 
 | Flag | Step | Description |

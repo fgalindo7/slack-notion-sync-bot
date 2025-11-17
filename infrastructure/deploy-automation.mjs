@@ -11,10 +11,24 @@ import readline from 'readline';
 
 const execAsync = promisify(exec);
 
-// Configuration
+// Helper: read gcloud config with env fallback
+async function getGcloudConfigValue(key) {
+  try {
+    const { stdout } = await execAsync(`gcloud config get-value ${key} --quiet 2>/dev/null`);
+    const val = stdout.trim();
+    if (!val || val === '(unset)') {
+      return null;
+    }
+    return val;
+  } catch {
+    return null;
+  }
+}
+
+// Configuration (initialized later in main)
 const CONFIG = {
-  projectId: process.env.GCP_PROJECT_ID || process.env.PROJECT_ID,
-  region: process.env.REGION || 'us-central1',
+  projectId: null,
+  region: null,
   pipelineName: 'oncall-cat-pipeline',
   serviceName: 'oncall-cat',
 };
@@ -236,10 +250,18 @@ async function checkStatus() {
  */
 async function main() {
   try {
+    // Resolve project/region from gcloud first, then env, then defaults
+    const gcProject = await getGcloudConfigValue('project');
+    const gcRunRegion = await getGcloudConfigValue('run/region');
+    const gcComputeRegion = await getGcloudConfigValue('compute/region');
+
+    CONFIG.projectId = gcProject || process.env.GCP_PROJECT_ID || process.env.PROJECT_ID || null;
+    CONFIG.region = gcRunRegion || gcComputeRegion || process.env.REGION || 'us-central1';
+
     // Validate configuration
     if (!CONFIG.projectId) {
-      log('✗ Error: GCP_PROJECT_ID or PROJECT_ID environment variable not set', 'red');
-      log('Usage: GCP_PROJECT_ID=your-project-id node deploy-automation.mjs', 'yellow');
+      log('✗ Error: No GCP project found in gcloud config or environment (GCP_PROJECT_ID/PROJECT_ID)', 'red');
+      log('Tip: run `gcloud config set project YOUR_PROJECT_ID` or set env var.', 'yellow');
       process.exit(1);
     }
     

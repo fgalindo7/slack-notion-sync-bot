@@ -13,10 +13,24 @@ import boxen from 'boxen';
 
 const execAsync = promisify(exec);
 
+// Read gcloud config with env fallback
+async function getGcloudConfigValue(key) {
+  try {
+    const { stdout } = await execAsync(`gcloud config get-value ${key} --quiet 2>/dev/null`);
+    const val = stdout.trim();
+    if (!val || val === '(unset)') {
+      return null;
+    }
+    return val;
+  } catch {
+    return null;
+  }
+}
+
 // Configuration
 const CONFIG = {
-  projectId: process.env.GCP_PROJECT_ID || process.env.PROJECT_ID,
-  region: process.env.REGION || 'us-central1',
+  projectId: null,
+  region: null,
   serviceName: 'oncall-cat',
   pipelineName: 'oncall-cat-pipeline',
   refreshInterval: 30000, // 30 seconds default
@@ -112,25 +126,53 @@ async function gcloud(command) {
 /**
  * Fetch application health from Cloud Run service
  */
-async function fetchAppHealth() {
+async function getIdentityToken() {
   try {
-    const serviceUrl = await gcloud(
-      `run services describe ${CONFIG.serviceName} --region=${CONFIG.region} --format='value(status.url)'`
-    );
-    
-    if (!serviceUrl) {
-      return null;
+    const { stdout } = await execAsync('gcloud auth print-identity-token');
+    const token = (stdout || '').trim();
+    return token || null;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchAppHealth(serviceUrl) {
+  try {
+    let url = serviceUrl;
+    if (!url) {
+      url = await gcloud(
+        `run services describe ${CONFIG.serviceName} --region=${CONFIG.region} --format='value(status.url)'`
+      );
+    }
+    if (!url) {
+      return { ok: false, error: 'Missing service URL' };
     }
 
-    const { stdout: healthJson } = await execAsync(`curl -s "${serviceUrl}/health"`);
-    const { stdout: metricsJson } = await execAsync(`curl -s "${serviceUrl}/metrics"`);
-    
-    const health = JSON.parse(healthJson);
-    const _metrics = JSON.parse(metricsJson);
-    
-    return { ...health, serviceUrl };
+    const idToken = await getIdentityToken();
+    const curlAuth = idToken
+      ? `curl -s -H "Authorization: Bearer ${idToken}" "${url}/health"`
+      : `curl -s "${url}/health"`;
+    const res = await execAsync(curlAuth);
+    const text = res.stdout?.trim() || '';
+    if (!text) {
+      return { ok: false, error: 'Empty response from /health' };
+    }
+    if (text.startsWith('<') || /<html/i.test(text)) {
+      if (!idToken) {
+        const retryToken = await getIdentityToken();
+        if (retryToken) {
+          const retry = await execAsync(`curl -s -H "Authorization: Bearer ${retryToken}" "${url}/health"`);
+          const retryText = retry.stdout?.trim() || '';
+          if (retryText && !(retryText.startsWith('<') || /<html/i.test(retryText))) {
+            return { ok: true, json: JSON.parse(retryText) };
+          }
+        }
+      }
+      return { ok: false, error: 'Non-JSON response from /health (likely unauthenticated). Try using an identity token.' };
+    }
+    return { ok: true, json: JSON.parse(text) };
   } catch (err) {
-    return { status: 'error', error: err.message };
+    return { ok: false, error: err.message };
   }
 }
 
@@ -785,8 +827,16 @@ async function renderDashboard() {
  * Main execution
  */
 async function main() {
+  // Resolve project/region from gcloud first, then env, then defaults
+  const gcProject = await getGcloudConfigValue('project');
+  const gcRunRegion = await getGcloudConfigValue('run/region');
+  const gcComputeRegion = await getGcloudConfigValue('compute/region');
+
+  CONFIG.projectId = gcProject || process.env.GCP_PROJECT_ID || process.env.PROJECT_ID || null;
+  CONFIG.region = gcRunRegion || gcComputeRegion || process.env.REGION || 'us-central1';
+
   if (!CONFIG.projectId) {
-    console.error(`${colors.red}Error: GCP_PROJECT_ID not set${colors.reset}`);
+    console.error(`${colors.red}Error: GCP project is not set in gcloud config and environment (GCP_PROJECT_ID/PROJECT_ID).${colors.reset}`);
     process.exit(1);
   }
   

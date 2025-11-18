@@ -110,6 +110,9 @@ const flags = {
   url: (args.find(a => a.startsWith('--url='))?.split('=')[1] || ''),
 };
 
+// Track whether we've rendered once in watch mode to reduce flicker
+let HAS_RENDERED = false;
+
 /**
  * Execute gcloud command and return parsed output
  */
@@ -742,10 +745,11 @@ function renderGitInfo(git, health) {
  * Main dashboard render
  */
 async function renderDashboard() {
+  // Clear screen only for single-run (non-watch) mode so watch scrolls naturally
   if (!flags.json && !flags.watch) {
     console.clear();
   }
-  
+
   // ASCII art cat logo (only in dashboard mode)
   if (!flags.json) {
     const catLogo = [
@@ -753,9 +757,12 @@ async function renderDashboard() {
       '      ( o.o ) ',
       '       > ^ <  ',
     ];
-    
-    console.log('');
-    catLogo.forEach(line => console.log(`  ${colors.cyan}${line}${colors.reset}`));
+
+    // In watch mode, show the cat only on the first render to reduce flicker
+    if (!flags.watch || !HAS_RENDERED) {
+      console.log('');
+      catLogo.forEach(line => console.log(`  ${colors.cyan}${line}${colors.reset}`));
+    }
   }
   
   // Fetch all data
@@ -831,6 +838,8 @@ async function renderDashboard() {
   if (flags.watch) {
     console.log(`\n${colors.gray}Refreshing in ${flags.interval / 1000}s... (Ctrl+C to exit)${colors.reset}`);
   }
+
+  HAS_RENDERED = true;
 }
 
 /**

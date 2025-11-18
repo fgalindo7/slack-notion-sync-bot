@@ -9,6 +9,7 @@
     "build": "node scripts/ops.mjs build",
     "lint": "eslint '**/*.{js,mjs}' --ignore-pattern 'node_modules/'",
     "lint:fix": "eslint '**/*.{js,mjs}' --ignore-pattern 'node_modules/' --fix",
+    "lint:md": "npx -y markdownlint-cli \"**/*.md\" --ignore node_modules --ignore coverage",
     "test": "node lib/parser.test.js && node lib/validation.test.js && node lib/metrics.test.js && node lib/schema-cache.test.js && node lib/config.test.js && node scripts/ops.mjs test",
     "test:cli": "node scripts/ops.mjs test",
     "test:parser": "node lib/parser.test.js",

@@ -55,35 +55,20 @@ gcloud config set project $PROJECT_ID
 export REGION="us-central1"  # or us-east1, europe-west1, etc.
 ```
 
-### 2. Run Setup Script
+### 2. Run Infrastructure Setup
 
-This will enable required APIs and create the Artifact Registry repository:
+Provision required resources (APIs, Artifact Registry, secrets) using the Node.js automation:
 
 ```shell
-./scripts/setup-gcp.sh
+npm run infra:setup
 ```
 
 **What this does:**
 - Enables Cloud Run, Artifact Registry, Secret Manager, Cloud Build APIs
-- Creates `oncall-cat` Docker repository in Artifact Registry
-- Configures Docker authentication
+- Creates or validates the Artifact Registry repository
+- Configures Docker auth and prompts for required secrets
 
-### 3. Create Secrets
-
-Store your credentials securely in Secret Manager:
-
-```shell
-./scripts/create-secrets.sh
-```
-
-**You'll be prompted for:**
-- Slack Bot Token
-- Slack App-Level Token
-- Notion Integration Token
-- (Optional) Slack Signing Secret
-- (Optional) channel-mappings.json for multi-channel mode
-
-**Verify secrets were created:**
+Secrets are created during `npm run infra:setup` (you’ll be prompted). You can verify with:
 
 ```shell
 gcloud secrets list
@@ -95,55 +80,26 @@ gcloud secrets list
 
 ### Option A: Quick Deployment (Recommended)
 
-**For Single-Channel Mode:**
-
 ```shell
-# Set your channel and database IDs
-export WATCH_CHANNEL_ID="C1234567890"
-export NOTION_DATABASE_ID="abc123def456ghi789"
+# Initialize Cloud Deploy pipeline (one-time)
+npm run deploy:init
 
-# Build and deploy in one command
-gcloud builds submit --config cloudbuild.yaml && \
-./scripts/deploy-gcp.sh
-```
-
-**For Multi-Channel Mode:**
-
-```shell
-# Create your channel-mappings.json first (see example)
-cp channel-mappings.json.example channel-mappings.json
-# Edit channel-mappings.json with your actual channel/database IDs
-
-# Upload to Secret Manager (if not done in setup)
-gcloud secrets create channel-mappings --data-file=channel-mappings.json
-
-# Build and deploy
-export MULTI_CHANNEL=true
-gcloud builds submit --config cloudbuild.yaml && \
-./scripts/deploy-gcp.sh
+# Create a new release and deploy to staging (interactive promote to prod)
+npm run deploy
 ```
 
 ### Option B: Step-by-Step Deployment
 
-**Step 1: Build Docker Image**
+1. Initialize pipeline (one-time):
 
 ```shell
-gcloud builds submit --config cloudbuild.yaml
+npm run deploy:init
 ```
 
-This builds your Docker image and pushes it to Artifact Registry.
-
-**Step 2: Deploy to Cloud Run**
+1. Create release and deploy to staging:
 
 ```shell
-# Single-channel
-export WATCH_CHANNEL_ID="C1234567890"
-export NOTION_DATABASE_ID="abc123def456ghi789"
-./scripts/deploy-gcp.sh
-
-# OR Multi-channel
-export MULTI_CHANNEL=true
-./scripts/deploy-gcp.sh
+npm run deploy
 ```
 
 ---
@@ -184,10 +140,10 @@ npm run health
 ### 3. View Logs
 
 ```shell
-# View recent logs
+# View recent logs (GCP by default)
 npm run logs
 
-# Follow logs in real-time
+# Follow logs in real-time (GCP)
 npm run logs -- --follow
 ```
 
@@ -260,11 +216,8 @@ gcloud run services update oncall-cat \
 ### Deploy New Version
 
 ```shell
-# Build new image
-gcloud builds submit --config cloudbuild.yaml
-
-# Deployment will automatically use latest image
-./scripts/deploy-gcp.sh
+# Create a new release (builds as part of release)
+npm run deploy
 ```
 
 ---

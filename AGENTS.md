@@ -254,111 +254,44 @@ PRs created by the coding agent include detailed session logs showing:
 
 ---
 
-## 4. Deployment Automation Scripts
+## 4. Deployment Automation (Node.js)
 
 **Primary Use:** Infrastructure provisioning, secret management, and deployment orchestration
 
-### Interactive Deployment Wizard
+### Infrastructure Automation
 
-**Location:** `scripts/setup-and-deploy.sh`
+**Locations:**
+- `infrastructure/setup-infrastructure.mjs` — provisions/validates APIs, Artifact Registry, and required secrets
+- `infrastructure/deploy-automation.mjs` — initializes Cloud Deploy and creates releases
 
-#### Wizard Capabilities
-
-- **8-step deployment flow:** From GCP setup to health checks
-- **Selective execution:** Run specific steps with flags
-- **Secret management:** Interactive prompts for sensitive data
-- **Channel configuration:** Multi-channel or single-channel setup
-- **Validation:** Checks for required tools and configurations
-- **Error handling:** Graceful failures with rollback guidance
-
-#### Usage Examples
+**npm Scripts:**
 
 ```shell
-# Full deployment (all 8 steps)
-./scripts/setup-and-deploy.sh
+# Provision infrastructure and required APIs/secrets
+npm run infra:setup
 
-# Update secrets only
-./scripts/setup-and-deploy.sh --required-secrets
+# Initialize Cloud Deploy pipeline (one-time)
+npm run deploy:init
 
-# Rebuild and redeploy after code changes
-./scripts/setup-and-deploy.sh --build-image --deploy
-
-# Update channel mappings
-./scripts/setup-and-deploy.sh --channels-and-dbs --deploy
+# Create a new release and deploy (staging → promote)
+npm run deploy
 ```
 
-#### Deployment Flow
+### Ops CLI
 
+**Location:** `scripts/ops.mjs`
+
+```shell
+# Health checks (GCP default)
+npm run health
+
+# Logs (GCP default, follow optional)
+npm run logs
+npm run logs -- --follow
+
+# Self-test the CLI
+npm run test:cli
 ```
-Step 1: Environment Setup
-  ├─ Checks: gcloud CLI installed
-  ├─ Sets: PROJECT_ID, REGION
-  └─ Validates: GCP authentication
-
-Step 2: GCP Initialization
-  ├─ Enables: Required APIs (Cloud Run, Artifact Registry, Secret Manager)
-  └─ Creates: Artifact Registry repository
-
-Step 3: Required Secrets
-  ├─ Creates: slack-bot-token (xoxb-...)
-  ├─ Creates: slack-app-token (xapp-...)
-  └─ Creates: notion-token (secret_...)
-
-Step 4: Channel & Database Configuration
-  ├─ Choice: Single-channel or multi-channel mode
-  ├─ Single: WATCH_CHANNEL_ID + NOTION_DATABASE_ID
-  └─ Multi: channel-mappings.json → Secret Manager
-
-Step 5: Docker Image Build
-  ├─ Builds: Container image from Dockerfile
-  └─ Pushes: To Artifact Registry
-
-Step 6: Cloud Run Deployment
-  ├─ Deploys: Service with secrets and env vars
-  ├─ Configures: min-instances=1 (Socket Mode requirement)
-  └─ Sets: Memory, CPU, port, timeout
-
-Step 7: Service Verification
-  ├─ Retrieves: Service URL
-  ├─ Checks: /health endpoint
-  └─ Validates: Metrics and uptime
-
-Step 8: Logs & Monitoring
-  ├─ Tails: Cloud Run logs
-  └─ Shows: Startup and message processing
-```
-
-### Individual Automation Scripts
-
-#### `scripts/setup-gcp.sh`
-
-- Enables GCP APIs
-- Creates Artifact Registry repository
-- Validates project configuration
-
-#### `scripts/create-secrets.sh`
-
-- Interactive secret creation wizard
-- Validates secret format (token prefixes)
-- Supports channel-mappings.json upload
-
-#### `scripts/deploy-gcp.sh`
-
-- Deploys to Cloud Run with full configuration
-- Handles single-channel and multi-channel modes
-- Configures secrets, env vars, scaling
-
-#### `scripts/view-logs.sh`
-
-- Tails Cloud Run logs with streaming
-- Filters for errors and important events
-- Formats with colors and timestamps
-
-#### `scripts/check-health.sh`
-
-- Queries /health and /metrics endpoints
-- Validates uptime and success rates
-- Alerts on anomalies
 
 ---
 
@@ -380,22 +313,6 @@ Step 8: Logs & Monitoring
   }
 }
 ```
-
-### Current Coverage Status
-
-| Metric | Threshold | Current | Status |
-|--------|-----------|---------|--------|
-| **Line Coverage** | 75% | 88.44% | ✅ +13.44% |
-| **Function Coverage** | 60% | 61.53% | ✅ +1.53% |
-| **Branch Coverage** | 60% | 75% | ✅ +15% |
-
-### Coverage by Module
-
-| Module | Lines | Branches | Functions | Tests |
-|--------|-------|----------|-----------|-------|
-| `parser.js` | 91.75% | 79.06% | 100% | 53 tests |
-| `validation.js` | 79.12% | 58.33% | 40% | 27 tests |
-| `constants.js` | 90.8% | 100% | 0% | N/A (constants) |
 
 ### Test Organization
 
@@ -686,7 +603,7 @@ jobs:
     - run: npm test
     - run: npm run test:coverage:check
   deploy:
-    - run: ./scripts/deploy-gcp.sh
+    - run: npm run deploy
 ```
 
 #### 2. Automated Dependency Updates
@@ -967,7 +884,6 @@ Alt+\ - Trigger code completion
 - **AGENTS.md** - This document (AI agents and automation)
 - **docs/GCP_DEPLOYMENT.md** - Comprehensive deployment guide
 - **docs/GCP_QUICK_REFERENCE.md** - Quick command reference
-- **docs/SCRIPT_FLAGS.md** - Script usage and flags
 
 ### Community
 

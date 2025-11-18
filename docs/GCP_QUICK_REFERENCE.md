@@ -9,30 +9,18 @@ Quick command reference for deploying and managing On-Call Cat on Google Cloud P
 export PROJECT_ID="your-gcp-project-id"
 export REGION="us-central1"
 
-# Run complete setup wizard (recommended)
-./scripts/setup-and-deploy.sh
+# Provision infrastructure and required APIs
+npm run infra:setup
+
+# Initialize Cloud Deploy pipeline (one-time)
+npm run deploy:init
 ```
 
-## Manual Setup Steps
+## Deploy
 
 ```shell
-# 1. Initial GCP setup
-./scripts/setup-gcp.sh
-
-# 2. Create secrets
-./scripts/create-secrets.sh
-
-# 3. Build Docker image
-gcloud builds submit --config cloudbuild.yaml
-
-# 4. Deploy (single-channel)
-export WATCH_CHANNEL_ID="C1234567890"
-export NOTION_DATABASE_ID="abc123def456"
-./scripts/deploy-gcp.sh
-
-# 4. Deploy (multi-channel)
-export MULTI_CHANNEL=true
-./scripts/deploy-gcp.sh
+# Create a new release and deploy to staging (interactive promote)
+npm run deploy
 ```
 
 ## Monitoring Commands
@@ -71,9 +59,8 @@ gcloud run services update oncall-cat \
 echo -n "new-token" | \
   gcloud secrets versions add slack-bot-token --data-file=-
 
-# Rebuild and redeploy
-gcloud builds submit --config cloudbuild.yaml && \
-./scripts/deploy-gcp.sh
+# Create a new release (builds and deploys)
+npm run deploy
 
 # Force restart service
 gcloud run services update oncall-cat \
@@ -107,7 +94,7 @@ gcloud run services update-traffic oncall-cat \
 
 # Delete and redeploy
 gcloud run services delete oncall-cat --region=$REGION
-./scripts/deploy-gcp.sh
+npm run deploy
 ```
 
 ## Secret Management

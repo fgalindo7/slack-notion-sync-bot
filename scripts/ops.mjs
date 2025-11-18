@@ -130,8 +130,8 @@ async function cmdDeploy(flags) {
     console.error('deploy is only supported for --target=gcp');
     process.exit(1);
   }
-  // Use existing proven script for now
-  await run('./scripts/setup-and-deploy.sh --build-image --deploy');
+  // Delegate to Cloud Deploy automation script
+  await run('node infrastructure/deploy-automation.mjs deploy');
 }
 
 async function cmdStatus(flags) {
@@ -210,7 +210,7 @@ async function main() {
       // Test 5: Deploy GCP
       reset();
       await cmdDeploy({ target: 'gcp' });
-      expect(executedCommands.some(c => c.includes('./scripts/setup-and-deploy.sh') && c.includes('--build-image') && c.includes('--deploy')), 'deploy gcp runs setup-and-deploy');
+      expect(executedCommands.some(c => c.includes('node infrastructure/deploy-automation.mjs deploy')), 'deploy gcp delegates to deploy-automation.mjs');
 
       if (failed > 0) {
         console.error(`\n${failed} test(s) failed.`);

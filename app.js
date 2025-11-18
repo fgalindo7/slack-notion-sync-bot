@@ -8,7 +8,7 @@
 import bolt from '@slack/bolt';              // Bolt is CJS; use default import
 const { App, LogLevel } = bolt;
 import { Client as Notion } from '@notionhq/client';
-import pino from 'pino';
+import { createLogger } from './lib/logger.js';
 import pThrottle from 'p-throttle';
 import pTimeout from 'p-timeout';
 import http from 'http';
@@ -34,14 +34,8 @@ const config = getConfig();
 setDefaults(config.defaults);
 setApiTimeout(config.api.timeout);
 
-// Initialize structured logger
-const logger = pino({
-  level: config.logging.level,
-  transport: config.logging.pretty ? {
-    target: 'pino-pretty',
-    options: { colorize: true }
-  } : undefined
-});
+// Initialize structured logger (component child)
+const logger = createLogger('app');
 
 // Rate limiter for Notion API
 const throttle = pThrottle({

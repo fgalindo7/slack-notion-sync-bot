@@ -71,25 +71,22 @@ async function cmdHealth(flags) {
 async function cmdLogs(flags) {
   if (flags.target === 'local') {
     const follow = flags.follow ? '-f' : '';
-    await run(`docker compose logs ${follow} oncall-auto`);
+    // Pipe through pino-pretty to match local formatting with app logger
+    await run(`docker compose logs ${follow} oncall-auto | npx pino-pretty --singleLine --translateTime "SYS:yyyy-mm-dd HH:MM:ss.l" --ignore "pid,hostname" --colorize`);
     return;
   }
   // GCP logs via Cloud Logging
-  const base = `gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=oncall-cat"`;
+  const query = `resource.type=cloud_run_revision AND resource.labels.service_name=oncall-cat`;
   if (flags.follow) {
     process.stdout.write('Following Cloud Run logs (Ctrl+C to stop)\n');
     if (DRY_RUN) {
-      await run(`${base} --limit=10 --format="table[no-heading](timestamp.date('%Y-%m-%d %H:%M:%S'),severity,textPayload)" --freshness=30s 2>/dev/null || true`);
+      await run(`gcloud logging tail "${query}" --format=json 2>/dev/null | node scripts/pretty-gcp-logs.mjs || true`);
       return;
     }
-    while (true) {
-      try {
-        await run(`${base} --limit=10 --format="table[no-heading](timestamp.date('%Y-%m-%d %H:%M:%S'),severity,textPayload)" --freshness=30s 2>/dev/null || true`);
-      } catch { /* ignore */ }
-      await new Promise(r => setTimeout(r, 5000));
-    }
+    // Stream with tail in follow mode and pretty-print
+    await run(`gcloud logging tail "${query}" --format=json 2>/dev/null | node scripts/pretty-gcp-logs.mjs`);
   } else {
-    await run(`${base} --limit=50 --format="table(timestamp,severity,textPayload)" --freshness=1h`);
+    await run(`gcloud logging read "${query}" --limit=50 --format=json --freshness=1h | node scripts/pretty-gcp-logs.mjs`);
   }
 }
 
@@ -165,12 +162,13 @@ async function main() {
       // Test 1: Local logs follow
       reset();
       await cmdLogs({ target: 'local', follow: true });
-      expect(executedCommands.some(c => c.includes('docker compose logs -f oncall-auto')), 'logs local follow builds correct command');
+      expect(executedCommands.some(c => c.includes('docker compose logs -f oncall-auto') && c.includes('pino-pretty')), 'logs local follow pipes through pino-pretty');
 
       // Test 2: GCP logs (non-follow)
       reset();
       await cmdLogs({ target: 'gcp', follow: false });
-      expect(executedCommands.some(c => c.includes('gcloud logging read') && c.includes('service_name=oncall-cat')), 'logs gcp builds correct query');
+      expect(executedCommands.some(c => c.includes('gcloud logging read') && c.includes('service_name=oncall-cat') && c.includes('--format=json')), 'logs gcp reads JSON');
+      expect(executedCommands.some(c => c.includes('scripts/pretty-gcp-logs.mjs')), 'logs gcp pipes to pretty-gcp-logs');
 
       // Test 3: Health local JSON with URL
       reset();

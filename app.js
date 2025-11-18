@@ -23,7 +23,7 @@ const BUILD_TIME = process.env.BUILD_TIME || 'unknown';
 import { getConfig, getDatabaseIdForChannel } from './lib/config.js';
 import { NOTION_FIELDS, DEFAULTS, API_TIMEOUT, setDefaults, setApiTimeout } from './lib/constants.js';
 import { parseAutoBlock, parseNeededByString, normalizeEmail, stripRichTextFormatting } from './lib/parser.js';
-import { missingFields, typeIssues, isTopLevel, getTrigger, suffixForTrigger } from './lib/validation.js';
+import { missingFields, typeIssues, getTrigger, suffixForTrigger } from './lib/validation.js';
 import { BotMetrics } from './lib/metrics.js';
 import { NotionSchemaCache } from './lib/schema-cache.js';
 

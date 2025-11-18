@@ -143,6 +143,73 @@ async function main() {
   const { cmd, flags } = parseArgs(process.argv);
   DRY_RUN = Boolean(flags['dry-run']);
   switch (cmd) {
+    case 'preflight': {
+      // IAM & pipeline sanity checks before deploy
+      const projectId = process.env.GCP_PROJECT_ID || process.env.PROJECT_ID;
+      const region = process.env.REGION || 'us-central1';
+      if (!projectId) { console.error('Missing GCP_PROJECT_ID/PROJECT_ID'); process.exit(1); }
+      const getProjectNumberCmd = `gcloud projects describe ${projectId} --format='value(projectNumber)'`;
+      const { stdout: pnOut } = await run(getProjectNumberCmd, { stdio: 'pipe' });
+      const projectNumber = pnOut.trim();
+      if (!projectNumber) { console.error('Failed to obtain project number'); process.exit(1); }
+      const cbSa = process.env.CLOUD_BUILD_SA_EMAIL || `${projectNumber}@cloudbuild.gserviceaccount.com`;
+      const runtimeSa = `${projectNumber}-compute@developer.gserviceaccount.com`;
+      const deploySa = `service-${projectNumber}@gcp-sa-clouddeploy.iam.gserviceaccount.com`;
+
+      const requiredCbRoles = new Set([
+        'roles/run.admin',
+        'roles/iam.serviceAccountUser',
+        'roles/clouddeploy.releaser',
+        'roles/clouddeploy.viewer',
+        'roles/artifactregistry.writer'
+      ]);
+      const requiredRuntimeRoles = new Set([
+        'roles/secretmanager.secretAccessor',
+        'roles/artifactregistry.reader'
+      ]);
+
+      const iamPolicyCmd = `gcloud projects get-iam-policy ${projectId} --format=json`;
+      const { stdout: policyJson } = await run(iamPolicyCmd, { stdio: 'pipe' });
+      let policy;
+      try { policy = JSON.parse(policyJson); } catch { console.error('Failed to parse IAM policy JSON'); process.exit(1); }
+      const bindings = policy.bindings || [];
+      const rolesFor = (email) => bindings.filter(b => b.members && b.members.includes(`serviceAccount:${email}`)).map(b => b.role);
+      const cbRoles = new Set(rolesFor(cbSa));
+      const runtimeRoles = new Set(rolesFor(runtimeSa));
+
+      const missingCb = [...requiredCbRoles].filter(r => !cbRoles.has(r));
+      const missingRuntime = [...requiredRuntimeRoles].filter(r => !runtimeRoles.has(r));
+
+      // ActAs check
+      const actAsCmd = `gcloud iam service-accounts get-iam-policy ${runtimeSa} --format=json`;
+      const { stdout: actAsJson } = await run(actAsCmd, { stdio: 'pipe' });
+      let actAsPolicy; try { actAsPolicy = JSON.parse(actAsJson); } catch { actAsPolicy = {}; }
+      const actBindings = actAsPolicy.bindings || [];
+      const actRole = actBindings.find(b => b.role === 'roles/iam.serviceAccountUser');
+      const hasDeployActAs = !!(actRole && actRole.members && actRole.members.includes(`serviceAccount:${deploySa}`));
+
+      // Pipeline visibility
+      const pipelineName = process.env.DELIVERY_PIPELINE || 'oncall-cat-pipeline';
+      let pipelineOk = true;
+      try {
+        await run(`gcloud deploy delivery-pipelines describe ${pipelineName} --region=${region} --project=${projectId} --format='value(name)'`, { stdio: 'pipe' });
+      } catch { pipelineOk = false; }
+
+      const problems = [];
+      if (missingCb.length) { problems.push(`Cloud Build SA missing roles: ${missingCb.join(', ')}`); }
+      if (missingRuntime.length) { problems.push(`Runtime SA missing roles: ${missingRuntime.join(', ')}`); }
+      if (!hasDeployActAs) { problems.push('Cloud Deploy service agent lacks ActAs on runtime SA'); }
+      if (!pipelineOk) { problems.push(`Pipeline '${pipelineName}' not readable (check existence or permissions)`); }
+
+      if (problems.length) {
+        console.error(colorizeLine('[ERR] Preflight failed'));
+        for (const p of problems) { console.error(colorizeLine(` - ${p}`)); }
+        process.exit(1);
+      } else {
+        console.log(colorizeLine('[OK] Preflight passed: IAM & pipeline checks satisfied'));
+      }
+      return;
+    }
     case 'health': return cmdHealth(flags);
     case 'logs': return cmdLogs(flags);
     case 'start': return cmdStart(flags);

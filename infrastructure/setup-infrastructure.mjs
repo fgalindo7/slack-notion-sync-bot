@@ -12,6 +12,7 @@ import { CloudBuildClient } from '@google-cloud/cloudbuild';
 import { ServiceManagerClient } from '@google-cloud/service-management';
 import readline from 'readline';
 import { promisify } from 'util';
+import { google } from 'googleapis';
 
 // Configuration
 const CONFIG = {
@@ -374,46 +375,131 @@ async function setupCloudDeploy() {
  */
 async function setupIAMPermissions() {
   logSection('Setting Up IAM Permissions');
-  
-  log('Required IAM permissions:', 'bright');
-  log('  • Cloud Build service account needs:', 'blue');
-  log('    - roles/run.admin', 'blue');
-  log('    - roles/iam.serviceAccountUser', 'blue');
-  log('  • Cloud Run service account (compute SA) needs:', 'blue');
-  log('    - roles/secretmanager.secretAccessor', 'blue');
-  log('    - roles/aiplatform.user', 'blue');
-  log('    - roles/clouddeploy.releaser (for Cloud Deploy)', 'blue');
-  log('    - roles/iam.serviceAccountUser (ActAs permission for Cloud Deploy)', 'blue');
-  
-  log('\nRun these commands to grant permissions:', 'bright');
-  log(`  PROJECT_NUMBER=$(gcloud projects describe ${CONFIG.projectId} --format='value(projectNumber)')`, 'bright');
-  log('', 'reset');
-  log('  # Cloud Build service account permissions', 'bright');
-  log(`  gcloud projects add-iam-policy-binding ${CONFIG.projectId} \\`, 'bright');
-  log(`    --member="serviceAccount:\${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \\`, 'bright');
-  log(`    --role="roles/run.admin"`, 'bright');
-  log(`  gcloud projects add-iam-policy-binding ${CONFIG.projectId} \\`, 'bright');
-  log(`    --member="serviceAccount:\${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \\`, 'bright');
-  log(`    --role="roles/iam.serviceAccountUser"`, 'bright');
-  log('', 'reset');
-  log('  # Cloud Run compute service account permissions', 'bright');
-  log(`  gcloud projects add-iam-policy-binding ${CONFIG.projectId} \\`, 'bright');
-  log(`    --member="serviceAccount:\${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \\`, 'bright');
-  log(`    --role="roles/secretmanager.secretAccessor"`, 'bright');
-  log(`  gcloud projects add-iam-policy-binding ${CONFIG.projectId} \\`, 'bright');
-  log(`    --member="serviceAccount:\${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \\`, 'bright');
-  log(`    --role="roles/aiplatform.user"`, 'bright');
-  log('', 'reset');
-  log('  # Cloud Deploy permissions (REQUIRED for automated deployments)', 'bright');
-  log(`  gcloud projects add-iam-policy-binding ${CONFIG.projectId} \\`, 'bright');
-  log(`    --member="serviceAccount:\${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \\`, 'bright');
-  log(`    --role="roles/clouddeploy.releaser"`, 'bright');
-  log('', 'reset');
-  log('  # ActAs permission (allows compute SA to impersonate itself for Cloud Deploy)', 'bright');
-  log(`  gcloud iam service-accounts add-iam-policy-binding \\`, 'bright');
-  log(`    \${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \\`, 'bright');
-  log(`    --member="serviceAccount:\${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \\`, 'bright');
-  log(`    --role="roles/iam.serviceAccountUser"`, 'bright');
+
+  // Helper: fetch project number
+  async function getProjectNumber(projectId) {
+    const crm = google.cloudresourcemanager('v1');
+    const auth = await google.auth.getClient({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+    google.options({ auth });
+    const { data } = await crm.projects.get({ projectId });
+    return data.projectNumber?.toString();
+  }
+
+  // Helper: ensure project-level IAM bindings
+  async function ensureProjectBindings(projectId, bindings) {
+    const crm = google.cloudresourcemanager('v1');
+    const auth = await google.auth.getClient({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+    google.options({ auth });
+    const getResp = await crm.projects.getIamPolicy({ resource: projectId, requestBody: {} });
+    const policy = getResp.data || { bindings: [] };
+    policy.bindings = policy.bindings || [];
+
+    let changed = false;
+    for (const { role, members } of bindings) {
+      let b = policy.bindings.find(x => x.role === role);
+      if (!b) { b = { role, members: [] }; policy.bindings.push(b); changed = true; }
+      for (const m of members) {
+        if (!b.members.includes(m)) { b.members.push(m); changed = true; }
+      }
+    }
+    if (changed) {
+      await crm.projects.setIamPolicy({ resource: projectId, requestBody: { policy } });
+    }
+    return changed;
+  }
+
+  // Helper: ensure service account-level IAM binding (ActAs)
+  async function ensureServiceAccountBinding(targetSaEmail, memberSaEmail, role = 'roles/iam.serviceAccountUser') {
+    const iam = google.iam('v1');
+    const auth = await google.auth.getClient({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+    google.options({ auth });
+    const resource = `projects/-/serviceAccounts/${targetSaEmail}`;
+    const getResp = await iam.projects.serviceAccounts.getIamPolicy({ resource });
+    const policy = getResp.data || { bindings: [] };
+    policy.bindings = policy.bindings || [];
+    let b = policy.bindings.find(x => x.role === role);
+    if (!b) { b = { role, members: [] }; policy.bindings.push(b); }
+    const member = `serviceAccount:${memberSaEmail}`;
+    if (!b.members.includes(member)) {
+      b.members.push(member);
+      await iam.projects.serviceAccounts.setIamPolicy({ resource, requestBody: { policy } });
+      return true;
+    }
+    return false;
+  }
+
+  // Compute principal emails
+  const projectId = CONFIG.projectId;
+  const projectNumber = await getProjectNumber(projectId);
+  const defaultCbSa = `${projectNumber}@cloudbuild.gserviceaccount.com`;
+  const customCbSa = process.env.CLOUD_BUILD_SA_EMAIL || '';
+  const cloudBuildSa = customCbSa || defaultCbSa;
+  const computeSa = `${projectNumber}-compute@developer.gserviceaccount.com`;
+  const cloudDeployServiceAgent = `service-${projectNumber}@gcp-sa-clouddeploy.iam.gserviceaccount.com`;
+
+  log(`Project Number: ${projectNumber}`, 'blue');
+  log(`Cloud Build SA: ${cloudBuildSa}${customCbSa ? ' (custom)' : ' (default)'}`, 'blue');
+  log(`Runtime (Compute) SA: ${computeSa}`, 'blue');
+  log(`Cloud Deploy SA: ${cloudDeployServiceAgent}`, 'blue');
+
+  // Ensure project-level roles
+  const projectBindings = [
+    // Cloud Build SA minimum required
+    { role: 'roles/run.admin', members: [`serviceAccount:${cloudBuildSa}`] },
+    { role: 'roles/iam.serviceAccountUser', members: [`serviceAccount:${cloudBuildSa}`] },
+    { role: 'roles/clouddeploy.releaser', members: [`serviceAccount:${cloudBuildSa}`] },
+    { role: 'roles/clouddeploy.viewer', members: [`serviceAccount:${cloudBuildSa}`] },
+    { role: 'roles/artifactregistry.writer', members: [`serviceAccount:${cloudBuildSa}`] },
+    // Runtime SA least privilege
+    { role: 'roles/artifactregistry.reader', members: [`serviceAccount:${computeSa}`] },
+    { role: 'roles/secretmanager.secretAccessor', members: [`serviceAccount:${computeSa}`] },
+    ...(process.env.INCLUDE_VERTEX_AI === '1' ? [{ role: 'roles/aiplatform.user', members: [`serviceAccount:${computeSa}`] }] : [])
+  ];
+
+  const changed = await ensureProjectBindings(projectId, projectBindings);
+  if (changed) {
+    log('✓ Project-level IAM bindings updated', 'green');
+  } else {
+    log('✓ Project-level IAM bindings already satisfied', 'green');
+  }
+
+  // Ensure Cloud Deploy SA can act as runtime SA (ActAs)
+  const saChanged = await ensureServiceAccountBinding(computeSa, cloudDeployServiceAgent, 'roles/iam.serviceAccountUser');
+  if (saChanged) {
+    log('✓ Granted Cloud Deploy SA ActAs on runtime service account', 'green');
+  } else {
+    log('✓ Cloud Deploy SA ActAs on runtime service account already satisfied', 'green');
+  }
+  // Optional pruning of runtime SA elevated roles
+  if (process.env.PRUNE_RUNTIME_ROLES === '1') {
+    const pruneRoles = new Set([
+      'roles/run.admin',
+      'roles/artifactregistry.writer',
+      'roles/secretmanager.admin',
+      'roles/clouddeploy.releaser',
+      'roles/storage.admin'
+    ]);
+    const crm = google.cloudresourcemanager('v1');
+    const auth = await google.auth.getClient({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+    google.options({ auth });
+    const policyResp = await crm.projects.getIamPolicy({ resource: projectId, requestBody: {} });
+    const policy = policyResp.data;
+    let modified = false;
+    policy.bindings = (policy.bindings || []).map(b => {
+      if (!pruneRoles.has(b.role)) { return b; }
+      const filteredMembers = b.members.filter(m => m !== `serviceAccount:${computeSa}`);
+      if (filteredMembers.length !== b.members.length) { modified = true; }
+      return { ...b, members: filteredMembers };
+    });
+    if (modified) {
+      await crm.projects.setIamPolicy({ resource: projectId, requestBody: { policy } });
+      log('✓ Pruned elevated runtime SA roles', 'green');
+    } else {
+      log('✓ No elevated runtime SA roles to prune', 'green');
+    }
+  } else {
+    log('Runtime role pruning skipped (set PRUNE_RUNTIME_ROLES=1 to enable)', 'yellow');
+  }
 }
 
 /**

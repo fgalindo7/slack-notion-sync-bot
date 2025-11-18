@@ -63,10 +63,20 @@ Provision required resources (APIs, Artifact Registry, secrets) using the Node.j
 npm run infra:setup
 ```
 
+If you use a custom Cloud Build service account (instead of the default `PROJECT_NUMBER@cloudbuild.gserviceaccount.com`), set it before running setup so IAM bindings are applied correctly:
+
+```shell
+export CLOUD_BUILD_SA_EMAIL="cloud-build-slack-notion-sync@${PROJECT_ID}.iam.gserviceaccount.com"
+npm run infra:setup
+```
+
 **What this does:**
 - Enables Cloud Run, Artifact Registry, Secret Manager, Cloud Build APIs
 - Creates or validates the Artifact Registry repository
 - Configures Docker auth and prompts for required secrets
+- Grants IAM roles (run.admin, iam.serviceAccountUser, clouddeploy.releaser/viewer, artifactregistry.writer) to Cloud Build SA
+- Grants IAM roles (secretmanager.secretAccessor, artifactregistry.reader) to the runtime service account
+- Grants Cloud Deploy service agent ActAs on the runtime service account
 
 Secrets are created during `npm run infra:setup` (you’ll be prompted). You can verify with:
 
@@ -292,6 +302,54 @@ gcloud alpha monitoring policies create \
 ### Permission Errors
 
 **Grant Cloud Run service account access to secrets:**
+**Cloud Deploy release creation fails with PERMISSION_DENIED:**
+
+Error example:
+
+```
+ERROR: (gcloud.deploy.releases.create) PERMISSION_DENIED: Permission 'clouddeploy.deliveryPipelines.get' denied on 'projects/PROJECT/locations/REGION/deliveryPipelines/PIPELINE'. This command is authenticated as <CLOUD_BUILD_SA_EMAIL>
+```
+
+Fix by ensuring your Cloud Build service account has the following roles at the project level:
+
+```shell
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:${CLOUD_BUILD_SA_EMAIL}" \
+  --role="roles/clouddeploy.releaser"
+
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:${CLOUD_BUILD_SA_EMAIL}" \
+  --role="roles/clouddeploy.viewer"
+
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:${CLOUD_BUILD_SA_EMAIL}" \
+  --role="roles/run.admin"
+
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:${CLOUD_BUILD_SA_EMAIL}" \
+  --role="roles/iam.serviceAccountUser"
+
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:${CLOUD_BUILD_SA_EMAIL}" \
+  --role="roles/artifactregistry.writer"
+
+# Runtime SA pulls images and needs secrets
+COMPUTE_SA="$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')-compute@developer.gserviceaccount.com"
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:${COMPUTE_SA}" \
+  --role="roles/artifactregistry.reader"
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:${COMPUTE_SA}" \
+  --role="roles/secretmanager.secretAccessor"
+
+# Allow Cloud Deploy service agent to ActAs the runtime SA
+PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')
+gcloud iam service-accounts add-iam-policy-binding \
+  ${COMPUTE_SA} \
+  --member="serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-clouddeploy.iam.gserviceaccount.com" \
+  --role="roles/iam.serviceAccountUser"
+```
+
 
 ```shell
 # Get service account email

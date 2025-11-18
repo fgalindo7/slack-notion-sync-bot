@@ -185,7 +185,11 @@ You can also use individual scripts directly:
 
 ```shell
 # View logs
-npm run logs -- --follow
+npm run logs                     # GCP by default (recent, stdout-only)
+npm run logs -- --follow         # Follow GCP logs (stream)
+npm run logs -- --target=local   # Local logs (recent)
+npm run logs -- --target=gcp     # Explicit GCP target
+npm run logs -- --target=gcp --include-requests  # Include request logs
 
 # Check health
 ./scripts/check-health.sh

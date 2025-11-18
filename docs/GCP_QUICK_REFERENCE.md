@@ -41,11 +41,14 @@ export MULTI_CHANNEL=true
 # Check service health
 npm run health
 
-# View recent logs
-./scripts/view-logs.sh
+# View recent logs (GCP)
+npm run logs -- --target=gcp
 
-# Follow logs in real-time
-./scripts/view-logs.sh --follow
+# Follow logs in real-time (GCP)
+npm run logs -- --target=gcp --follow
+
+# Include Cloud Run request logs (in addition to stdout)
+npm run logs -- --target=gcp --include-requests
 
 # View service details
 gcloud run services describe oncall-cat --region=$REGION
@@ -208,6 +211,7 @@ gcloud run services logs read oncall-cat \
 ## Environment Variables Reference
 
 ### Required (Single-Channel)
+
 - `SLACK_BOT_TOKEN` (secret)
 - `SLACK_APP_LEVEL_TOKEN` (secret)
 - `NOTION_TOKEN` (secret)
@@ -216,6 +220,7 @@ gcloud run services logs read oncall-cat \
 - `CHANNEL_DB_MAPPINGS=false`
 
 ### Required (Multi-Channel)
+
 - `SLACK_BOT_TOKEN` (secret)
 - `SLACK_APP_LEVEL_TOKEN` (secret)
 - `NOTION_TOKEN` (secret)
@@ -223,6 +228,7 @@ gcloud run services logs read oncall-cat \
 - `/secrets/channel-mappings` (secret file)
 
 ### Optional
+
 - `ALLOW_THREADS=false`
 - `API_TIMEOUT=10000`
 - `SCHEMA_CACHE_TTL=3600000`
@@ -233,6 +239,7 @@ gcloud run services logs read oncall-cat \
 ## Cloud Run Configuration
 
 ### Recommended Settings
+
 ```shell
 --min-instances=1          # Keep Socket Mode connection alive
 --max-instances=3          # Prevent runaway costs
@@ -243,6 +250,7 @@ gcloud run services logs read oncall-cat \
 ```
 
 ### Performance Settings
+
 ```shell
 --memory=1Gi               # For high-volume channels
 --cpu=2                    # For faster processing

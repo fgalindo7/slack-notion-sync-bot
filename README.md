@@ -194,7 +194,8 @@ CHANNEL_DB_MAPPINGS=false
 ALLOW_THREADS=false
 API_TIMEOUT=10000
 SCHEMA_CACHE_TTL=3600000
-HEALTH_PORT=3000
+HEALTH_PORT=1987
+PORT=1987
 LOG_LEVEL=info
 ```
 
@@ -212,7 +213,8 @@ CHANNEL_DB_MAPPINGS_FILE=./channel-mappings.json
 ALLOW_THREADS=false
 API_TIMEOUT=10000
 SCHEMA_CACHE_TTL=3600000
-HEALTH_PORT=3000
+HEALTH_PORT=1987
+PORT=1987
 LOG_LEVEL=info
 ```
 
@@ -297,12 +299,6 @@ The codebase follows a hybrid functional/OO approach:
 ---
 
 ## Development
-
-Run with hot reload:
-
-```shell
-npm run dev
-```
 
 Run linter:
 
@@ -394,6 +390,36 @@ curl http://localhost:1987/metrics
 ```
 
 Returns detailed metrics in JSON format with success rates and uptime.
+
+## Logs
+
+Unified, colorized logs are available locally and on GCP with the same format.
+
+- Local logs (pretty):
+
+```shell
+npm run logs -- --target=local          # recent logs
+npm run logs -- --target=local --follow # stream logs
+```
+
+- GCP logs (pretty via Cloud Logging):
+
+```shell
+# Recent logs (stdout-only by default, best for app logs)
+npm run logs -- --target=gcp
+
+# Stream logs
+npm run logs -- --target=gcp --follow
+
+# Include Cloud Run request logs (in addition to stdout)
+npm run logs -- --target=gcp --include-requests
+```
+
+Behavior and defaults:
+- `--target` defaults to `gcp` if not specified.
+- GCP non-follow reads use `--freshness=1h` and `--limit=50`.
+- GCP reads default to stdout-only (excludes request logs) unless `--include-requests` is passed.
+- Follow mode uses `gcloud logging tail`; non-follow uses `gcloud logging read` with batched pretty-printing.
 
 ---
 

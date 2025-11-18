@@ -16,8 +16,7 @@ COPY app.js ./
 COPY lib ./lib
 
 # Copy channel mappings (will be overridden by secret in Cloud Run)
-# Channel mappings now injected via secret env var (CHANNEL_MAPPINGS_JSON);
-# omit optional file copy to avoid build failures when file excluded.
+COPY channel-mappings.json ./channel-mappings.json
 
 # (optional) expose a health port only if you added a health endpoint
 # EXPOSE 1987

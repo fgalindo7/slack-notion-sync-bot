@@ -173,7 +173,19 @@ async function main() {
       reset();
       await cmdLogs({ target: 'gcp', follow: false });
       expect(executedCommands.some(c => c.includes('gcloud logging read') && c.includes('service_name=oncall-cat') && c.includes('--format=json')), 'logs gcp reads JSON');
-      expect(executedCommands.some(c => c.includes('scripts/pretty-gcp-logs.mjs')), 'logs gcp pipes to pretty-gcp-logs');
+      expect(executedCommands.some(c => c.includes('run.googleapis.com%2Fstdout')), 'logs gcp defaults to stdout-only');
+      expect(executedCommands.some(c => c.includes('scripts/pretty-gcp-logs.mjs --batch')), 'logs gcp uses batch mode for array output');
+
+      // Test 2b: GCP logs include request logs
+      reset();
+      await cmdLogs({ target: 'gcp', follow: false, 'include-requests': true });
+      expect(executedCommands.some(c => c.includes('gcloud logging read') && !c.includes('run.googleapis.com%2Fstdout')), 'logs gcp include-requests removes stdout filter');
+
+      // Test 2c: GCP logs follow uses tail and stream mode
+      reset();
+      await cmdLogs({ target: 'gcp', follow: true });
+      expect(executedCommands.some(c => c.startsWith('gcloud logging tail') && c.includes('--format=json')), 'logs gcp follow uses tail');
+      expect(executedCommands.some(c => c.includes('scripts/pretty-gcp-logs.mjs') && !c.includes('--batch')), 'logs gcp follow does not use batch');
 
       // Test 3: Health local JSON with URL
       reset();
@@ -189,6 +201,11 @@ async function main() {
       await cmdStart({ target: 'local' });
       expect(executedCommands.some(c => c.includes('docker compose up -d --build')), 'start local triggers compose up');
       expect(executedCommands.some(c => c.includes('curl -sSf') && c.includes('http://localhost:1987/health')), 'start local checks health');
+
+      // Test 4b: Local logs non-follow pipes to pino-pretty
+      reset();
+      await cmdLogs({ target: 'local', follow: false });
+      expect(executedCommands.some(c => c.includes('docker compose logs  oncall-auto') && c.includes('pino-pretty')), 'logs local non-follow pipes through pino-pretty');
 
       // Test 5: Deploy GCP
       reset();

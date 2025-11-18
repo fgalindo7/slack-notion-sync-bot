@@ -167,7 +167,7 @@ Multi-channel mode requires this file. The script will create it from the exampl
 ./scripts/setup-and-deploy.sh --verify
 
 # Or use direct script
-./scripts/check-health.sh
+npm run health
 ```
 
 ### Scenario: Changed Configuration
@@ -185,7 +185,7 @@ You can also use individual scripts directly:
 
 ```shell
 # View logs
-./scripts/view-logs.sh --follow
+npm run logs -- --follow
 
 # Check health
 ./scripts/check-health.sh

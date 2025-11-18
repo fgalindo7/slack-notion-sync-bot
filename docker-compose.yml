@@ -6,6 +6,12 @@ services:
     container_name: oncall-auto
     restart: unless-stopped
     env_file: .env
+    environment:
+      - NODE_ENV=production
+      - ALLOW_THREADS=${ALLOW_THREADS:-true}
+      - CHANNEL_DB_MAPPINGS=${CHANNEL_DB_MAPPINGS:-true}
+    volumes:
+      - ./channel-mappings.json:/app/channel-mappings.json:ro
     # Port 1987 exposed for health check endpoint
     # Socket Mode: Slack connects via websockets (no inbound port needed for Slack)
     healthcheck:

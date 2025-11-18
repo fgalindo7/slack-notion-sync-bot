@@ -39,7 +39,7 @@ export MULTI_CHANNEL=true
 
 ```shell
 # Check service health
-./scripts/check-health.sh
+npm run health
 
 # View recent logs
 ./scripts/view-logs.sh

@@ -164,7 +164,7 @@ echo "Service URL: $SERVICE_URL"
 ### 2. Test Health Endpoint
 
 ```shell
-./scripts/check-health.sh
+npm run health
 ```
 
 **Expected output:**
@@ -185,10 +185,10 @@ echo "Service URL: $SERVICE_URL"
 
 ```shell
 # View recent logs
-./scripts/view-logs.sh
+npm run logs
 
 # Follow logs in real-time
-./scripts/view-logs.sh --follow
+npm run logs -- --follow
 ```
 
 **Look for:**
@@ -293,7 +293,7 @@ gcloud logging read "resource.type=cloud_run_revision AND resource.labels.servic
   --project=$PROJECT_ID
 
 # Check service metrics
-./scripts/check-health.sh
+npm run health
 ```
 
 ### Set Up Alerts

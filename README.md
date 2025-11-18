@@ -402,9 +402,9 @@ Returns detailed metrics in JSON format with success rates and uptime.
 ### Local / Docker Deployment
 
 ```shell
-docker compose build --no-cache
-docker compose up -d
-docker logs -f oncall-auto
+npm run build
+npm run start
+npm run logs
 
 # Expect: "⚡️ On-Call Cat running (Socket Mode)"
 ```
@@ -441,11 +441,11 @@ git push origin main     # Auto-deploys to staging
 
 ## Local Development
 
-Run locally with Docker:
+Run locally with Docker (npm convenience):
 
 ```shell
-docker compose up -d
-docker logs -f oncall-auto
+npm run start
+npm run logs
 ```
 
 Or run directly with Node.js (requires environment variables):
@@ -481,8 +481,8 @@ on-call-cat/
 │   ├── SETUP_FLOW.md             # Deployment wizard flow diagram
 │   └── SCRIPT_FLAGS.md           # Script flags and selective execution
 ├── scripts/                      # Utility scripts
-│   ├── view-logs.sh              # View Cloud Run logs
-│   └── check-health.sh           # Check service health status
+│   ├── ops.mjs                   # Unified CLI (health, logs, start, stop, build, deploy)
+│   └── check-health.mjs          # Health dashboard (used by ops)
 ├── lib/                          # Modular components
 │   ├── config.js                 # Centralized configuration & multi-channel routing
 │   ├── constants.js              # App-wide constants (defaults, regexes)

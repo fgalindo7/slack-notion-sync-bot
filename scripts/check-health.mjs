@@ -11,7 +11,7 @@ import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import boxen from 'boxen';
 import icons from '../lib/ascii-icons.js';
-import { getCatFrame } from '../lib/ascii-art.js';
+import { getCatFrame, catFrames } from '../lib/ascii-art.js';
 
 const execAsync = promisify(exec);
 
@@ -102,6 +102,8 @@ const flags = {
   interval: parseInt(args.find(arg => arg.startsWith('--interval='))?.split('=')[1] || CONFIG.refreshInterval),
   target: (args.find(a => a.startsWith('--target='))?.split('=')[1] || '').toLowerCase(),
   url: (args.find(a => a.startsWith('--url='))?.split('=')[1] || ''),
+  animInterval: parseInt(args.find(arg => arg.startsWith('--anim-interval='))?.split('=')[1] || '650'),
+  animMode: (args.find(a => a.startsWith('--anim-mode='))?.split('=')[1] || 'gentle'),
 };
 
 // Track whether we've rendered once in watch mode to reduce flicker
@@ -744,8 +746,9 @@ async function renderDashboard() {
     console.clear();
   }
 
-  // ASCII art cat logo, animated in watch mode and static in single run
-  if (!flags.json) {
+  // ASCII art cat logo: static in single run; in watch mode, the header
+  // animation loop handles painting to avoid duplicate cats.
+  if (!flags.json && !flags.watch) {
     const frame = getCatFrame();
     console.log('');
     frame.forEach(line => console.log(`  ${colors.cyan}${line}${colors.reset}`));
@@ -846,12 +849,61 @@ async function main() {
   }
   
   if (flags.watch) {
-    // Watch mode - refresh periodically (full redraw for animation)
+    // Initial full render
     await renderDashboard();
-    setInterval(async () => {
+
+    // Animation state (blink-only gentle loop)
+    const gentle = flags.animMode === 'gentle';
+    const motions = gentle
+      ? [
+          { name: 'calm',  frames: ['normal','normal','normal','normal','normal'] },
+          { name: 'blink', frames: ['normal','blink','blink','blink','normal'] },
+          { name: 'rest',  frames: ['normal','normal','normal'] },
+          { name: 'blink', frames: ['normal','blink','blink','normal'] },
+          { name: 'calm',  frames: ['normal','normal','normal','normal'] },
+        ]
+      : [
+          { name: 'blink', frames: ['normal','blink','normal','blink','blink','normal'] },
+        ];
+    let mi = 0; // motion index
+    let fi = 0; // frame index within motion
+
+    // Paint only the cat header at the top, leaving body intact
+    function paintCatHeader(key) {
+      // Move cursor to top-left, print one blank line + 3 cat lines colored
+      process.stdout.write('\x1b[H');
+      console.log('');
+      const lines = (catFrames[key] || catFrames.normal);
+      for (const line of lines) {
+        // Leading two spaces to match dashboard indent
+        process.stdout.write(`  ${colors.cyan}${line}${colors.reset}\n`);
+      }
+    }
+
+    // Animation loop
+    const animTimer = setInterval(() => {
+      const motion = motions[mi];
+      const key = motion.frames[fi];
+      paintCatHeader(key);
+      fi += 1;
+      if (fi >= motion.frames.length) {
+        fi = 0;
+        mi = (mi + 1) % motions.length;
+      }
+    }, Math.max(120, flags.animInterval));
+
+    // Periodic full refresh (rebuilds the body and resets header baseline)
+    const bodyTimer = setInterval(async () => {
       console.clear();
       await renderDashboard();
-    }, flags.interval);
+    }, Math.max(1000, flags.interval));
+
+    // Ensure process keeps running with intervals; handle Ctrl+C to cleanup
+    process.on('SIGINT', () => {
+      clearInterval(animTimer);
+      clearInterval(bodyTimer);
+      process.exit(130);
+    });
   } else {
     // Single run
     await renderDashboard();

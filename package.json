@@ -26,7 +26,8 @@
     "status": "node scripts/ops.mjs status",
     "logs": "node scripts/ops.mjs logs",
     "health:watch": "node scripts/check-health.mjs --watch",
-    "health:json": "node scripts/check-health.mjs --json"
+    "health:json": "node scripts/check-health.mjs --json",
+    "cat": "node scripts/cat-demo.mjs"
   },
   "dependencies": {
     "@google-cloud/artifact-registry": "^4.3.1",

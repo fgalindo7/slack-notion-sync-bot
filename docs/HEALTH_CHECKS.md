@@ -396,6 +396,6 @@ The health check script uses these environment variables:
 ---
 
 <p align="center">
-  <sub>📊 Health monitoring for On-Call Cat</sub><br>
+  <sub>Health monitoring for On-Call Cat</sub><br>
   <sub>Last updated: November 14, 2025</sub>
 </p>

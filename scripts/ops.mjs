@@ -4,6 +4,7 @@
  * Commands: health, logs, start, stop, build, deploy, status
  */
 import { exec } from 'child_process';
+import { colorizeLine } from '../lib/status-colors.js';
 import { promisify } from 'util';
 
 const execAsync = promisify(exec);
@@ -32,7 +33,7 @@ async function run(cmd, opts = {}) {
   if (DRY_RUN) {
     executedCommands.push(cmd);
     if (stdio === 'inherit') {
-      console.log(`[dry-run] ${cmd}`);
+      console.log(colorizeLine(`[dry-run] ${cmd}`));
     }
     return { stdout: '', stderr: '' };
   }
@@ -103,9 +104,9 @@ async function cmdStart(flags) {
   await run('docker compose up -d --build');
   const ok = await waitForHealth('http://localhost:1987');
   if (ok) {
-    console.log('✅ Healthy at http://localhost:1987/health');
+    console.log(colorizeLine('[OK] Healthy at http://localhost:1987/health'));
   } else {
-    console.log('⚠ Health endpoint not responding yet. Try: npm run logs');
+    console.log(colorizeLine('[WARN] Health endpoint not responding yet. Try: npm run logs'));
   }
 }
 
@@ -155,9 +156,9 @@ async function main() {
       const expect = (cond, msg) => {
         if (!cond) {
           failed++;
-          console.error(`✗ ${msg}`);
+            console.error(colorizeLine(`[ERR] ${msg}`));
         } else {
-          console.log(`✓ ${msg}`);
+            console.log(colorizeLine(`[OK] ${msg}`));
         }
       };
 
@@ -213,21 +214,21 @@ async function main() {
       expect(executedCommands.some(c => c.includes('node infrastructure/deploy-automation.mjs deploy')), 'deploy gcp delegates to deploy-automation.mjs');
 
       if (failed > 0) {
-        console.error(`\n${failed} test(s) failed.`);
+        console.error(colorizeLine(`\n[ERR] ${failed} test(s) failed.`));
         process.exit(1);
       } else {
-        console.log('\nAll ops CLI tests passed.');
+        console.log(colorizeLine('\n[OK] All ops CLI tests passed.'));
         return;
       }
     }
     default:
-      console.log('Usage: node scripts/ops.mjs <command> [--target=local|gcp] [--json] [--follow] [--url=...] [--dry-run]');
-      console.log('Commands: health, logs, start, stop, build, deploy, status, test');
+      console.log(colorizeLine('Usage: node scripts/ops.mjs <command> [--target=local|gcp] [--json] [--follow] [--url=...] [--dry-run]'));
+      console.log(colorizeLine('Commands: health, logs, start, stop, build, deploy, status, test'));
       process.exit(cmd ? 1 : 0);
   }
 }
 
 main().catch(err => {
-  console.error(err.message || String(err));
+  console.error(colorizeLine(`[ERR] ${err.message || String(err)}`));
   process.exit(1);
 });

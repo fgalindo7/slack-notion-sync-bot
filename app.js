@@ -9,6 +9,7 @@ import bolt from '@slack/bolt';              // Bolt is CJS; use default import
 const { App, LogLevel } = bolt;
 import { Client as Notion } from '@notionhq/client';
 import { createLogger } from './lib/logger.js';
+import icons from './lib/ascii-icons.js';
 import pThrottle from 'p-throttle';
 import pTimeout from 'p-timeout';
 import http from 'http';
@@ -282,13 +283,13 @@ async function findPageForMessage({ slackTs, permalink, databaseId }) {
  * @param {string} params.channel - Slack channel ID
  * @param {string} params.ts - Message timestamp (for threading)
  * @param {string[]} params.fields - Array of missing field names
- * @param {string} [params.suffix=''] - Optional emoji suffix to append
+ * @param {string} [params.suffix=''] - Optional suffix/emoji to append
  * @returns {Promise<void>}
  */
 async function replyMissing({ client, channel, ts, fields, suffix = '' }) {
   const lines = fields.map(f => `• ${f}`).join('\n');
   const text =
-    `❗ *Missing Required Fields*\n\n` +
+    `${icons.emojiBang} *Missing Required Fields*\n\n` +
     `The following fields are required:\n${lines}\n\n` +
     `*How to fix:* Edit your original message and add the missing fields.\n` +
     `Keep the trigger at the top (@auto).\n\n` +
@@ -303,7 +304,7 @@ async function replyMissing({ client, channel, ts, fields, suffix = '' }) {
     `Needed by: 11/08/2025 5PM\n` +
     `Relevant Links: https://status.example.com\n` +
     `\`\`\`\n` +
-    `I'll automatically detect your edit and create the Notion page! 🚀`;
+    `I'll automatically detect your edit and create the Notion page!`;
   await client.chat.postMessage({ channel, thread_ts: ts, text: text + suffix });
 }
 
@@ -314,12 +315,12 @@ async function replyMissing({ client, channel, ts, fields, suffix = '' }) {
  * @param {string} params.channel - Slack channel ID
  * @param {string} params.ts - Message timestamp (for threading)
  * @param {string[]} params.issues - Array of validation error messages
- * @param {string} [params.suffix=''] - Optional emoji suffix to append
+ * @param {string} [params.suffix=''] - Optional suffix/emoji to append
  * @returns {Promise<void>}
  */
 async function replyInvalid({ client, channel, ts, issues, suffix = '' }) {
   const text =
-    `❗ *Format Validation Failed*\n\n` +
+    `${icons.emojiBang} *Format Validation Failed*\n\n` +
     issues.map(issue => {
       // Check if issue already has bullet formatting
       if (issue.includes('\n')) {
@@ -327,7 +328,7 @@ async function replyInvalid({ client, channel, ts, issues, suffix = '' }) {
       }
       return `• ${issue}`;
     }).join('\n\n') +
-    `\n\n*How to fix:* Edit your original message with the correct format. I'll automatically detect the edit and retry! 🔄`;
+    `\n\n*How to fix:* Edit your original message with the correct format. I'll automatically detect the edit and retry! ${icons.emojiReload}`;
   await client.chat.postMessage({ channel, thread_ts: ts, text: text + suffix });
 }
 
@@ -339,7 +340,7 @@ async function replyInvalid({ client, channel, ts, issues, suffix = '' }) {
  * @param {string} params.ts - Message timestamp (for threading)
  * @param {string} params.pageUrl - URL of the created Notion page
  * @param {Object} params.parsed - Parsed message data (for issue title)
- * @param {string} [params.suffix=''] - Optional emoji suffix to append
+ * @param {string} [params.suffix=''] - Optional suffix/emoji to append
  * @param {string} params.databaseId - Notion database ID (for schema lookup)
  * @returns {Promise<void>}
  */
@@ -347,7 +348,7 @@ async function replyCreated({ client, channel, ts, pageUrl, parsed, suffix = '',
   const schema = getSchemaCache(databaseId).getCurrent();
   const dbPart = schema?.dbUrl ? `<${schema.dbUrl}|${schema.dbTitle || DEFAULTS.DB_TITLE}>` : 'Notion DB';
   const pagePart = `<${pageUrl}|${parsed?.issue || 'Notion Page'}>`;
-  const text = `✅ Tracked: ${dbPart} › ${pagePart}` + suffix;
+  const text = `${icons.emojiOk} Tracked: ${dbPart} › ${pagePart}` + suffix;
   await client.chat.postMessage({ channel, thread_ts: ts, text });
 }
 
@@ -359,7 +360,7 @@ async function replyCreated({ client, channel, ts, pageUrl, parsed, suffix = '',
  * @param {string} params.ts - Message timestamp (for threading)
  * @param {string} params.pageUrl - URL of the updated Notion page
  * @param {Object} params.parsed - Parsed message data (for issue title)
- * @param {string} [params.suffix=''] - Optional emoji suffix to append
+ * @param {string} [params.suffix=''] - Optional suffix/emoji to append
  * @param {string} params.databaseId - Notion database ID (for schema lookup)
  * @returns {Promise<void>}
  */
@@ -367,7 +368,7 @@ async function replyUpdated({ client, channel, ts, pageUrl, parsed, suffix = '',
   const schema = getSchemaCache(databaseId).getCurrent();
   const dbPart = schema?.dbUrl ? `<${schema.dbUrl}|${schema.dbTitle || DEFAULTS.DB_TITLE}>` : 'Notion DB';
   const pagePart = `<${pageUrl}|${parsed?.issue || 'Notion Page'}>`;
-  const text = `🔄 Updated: ${dbPart} › ${pagePart}` + suffix;
+  const text = `${icons.emojiReload} Updated: ${dbPart} › ${pagePart}` + suffix;
   await client.chat.postMessage({ channel, thread_ts: ts, text });
 }
 
@@ -396,7 +397,7 @@ function isNotionPermError(err) {
  * @param {Object} params.client - Slack Web API client
  * @param {string} params.channel - Slack channel ID
  * @param {string} params.ts - Message timestamp (for threading)
- * @param {string} [params.suffix=''] - Optional emoji suffix to append
+ * @param {string} [params.suffix=''] - Optional suffix/emoji to append
  * @param {string} params.databaseId - Notion database ID (for schema lookup)
  * @returns {Promise<void>}
  */
@@ -404,7 +405,7 @@ async function notifyNotionPerms({ client, channel, ts, suffix = '', databaseId 
   const schema = getSchemaCache(databaseId).getCurrent();
   const dbPart = schema?.dbUrl ? `<${schema.dbUrl}|${schema.dbTitle || DEFAULTS.DB_TITLE}>` : 'the Notion database';
   const text =
-    `❗ I couldn't write to Notion due to *insufficient permissions*.\n` +
+    `${icons.emojiBang} I couldn't write to Notion due to *insufficient permissions*.\n` +
     `Please make sure your Notion integration is connected to ${dbPart} with *Can edit* access:\n` +
     `- In Notion, open the database as a full page → *Share* → *Add connection* → select this integration → *Allow*.\n` +
     `- Then try your message again (or edit the same message).` + suffix;
@@ -567,7 +568,7 @@ app.event('message', async ({ event, client }) => {
         await client.chat.postMessage({
           channel: event.channel,
           thread_ts: ts,
-          text: `⚠️ Request timed out. Please try again in a moment.${suffix}`
+          text: `${icons.emojiWarn} Request timed out. Please try again in a moment.${suffix}`
         }).catch(() => {}); // Ignore errors in error handler
         return;
       }
@@ -692,7 +693,7 @@ async function handleEdit({ event, client, databaseId }) {
       await client.chat.postMessage({
         channel,
         thread_ts: origTs,
-        text: `⚠️ Request timed out. Please try editing again in a moment.${suffix}`
+        text: `${icons.emojiWarn} Request timed out. Please try editing again in a moment.${suffix}`
       }).catch(() => {}); // Ignore errors in error handler
       return;
     }
@@ -1019,7 +1020,7 @@ const healthServer = http.createServer((req, res) => {
   
   await app.start(config.server.port);
   isHealthy = true; // Mark as healthy after successful Slack connection
-  logger.info({ port: config.server.port, mode: 'Socket Mode' }, '⚡️ On-Call Cat running');
+  logger.info({ port: config.server.port, mode: 'Socket Mode' }, `${icons.emojiLightning} On-Call Cat running`);
   
   // Start health check server
   healthServer.listen(config.server.healthPort, () => {

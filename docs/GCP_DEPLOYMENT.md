@@ -150,7 +150,7 @@ npm run logs -- --follow
 **Look for:**
 
 ```
-⚡️ On-Call Cat running (Socket Mode)
+On-Call Cat running (Socket Mode)
 ```
 
 ### 4. Test with Slack

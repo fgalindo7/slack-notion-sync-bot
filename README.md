@@ -146,20 +146,20 @@ The bot will auto-detect these columns by name. If neither exists, message updat
 
 | Variable | Description | Required |
 |-----------|-------------|----------|
-| SLACK_BOT_TOKEN | Bot token from your Slack App | ✅ Yes |
-| SLACK_APP_LEVEL_TOKEN | App-level token for Socket Mode | ✅ Yes |
-| SLACK_SIGNING_SECRET | Slack signing secret (optional if using Socket Mode only) | ⚠️ Optional |
-| NOTION_TOKEN | Notion API integration token | ✅ Yes |
-| CHANNEL_DB_MAPPINGS | Enable multi-channel mode (true/false, default: false) | ⚠️ Optional |
-| CHANNEL_DB_MAPPINGS_FILE | Path to channel mappings JSON (default: ./channel-mappings.json) | ⚠️ Optional |
-| WATCH_CHANNEL_ID | Slack channel ID to monitor (single-channel mode only) | ✅ Yes (single-channel) |
-| NOTION_DATABASE_ID | Target Notion database ID (single-channel mode only) | ✅ Yes (single-channel) |
-| ALLOW_THREADS | Allow parsing inside threads (true/false, default: false) | ⚠️ Optional |
-| API_TIMEOUT | Timeout for API calls in ms (default: 10000) | ⚠️ Optional |
-| SCHEMA_CACHE_TTL | Schema cache TTL in ms (default: 3600000 = 1 hour) | ⚠️ Optional |
-| HEALTH_PORT | Port for health check server (default: 1987) | ⚠️ Optional |
-| PORT | Port for main app (default: 1987) | ⚠️ Optional |
-| LOG_LEVEL | Logging level: trace, debug, info, warn, error (default: info) | ⚠️ Optional |
+| SLACK_BOT_TOKEN | Bot token from your Slack App | YES |
+| SLACK_APP_LEVEL_TOKEN | App-level token for Socket Mode | YES |
+| SLACK_SIGNING_SECRET | Slack signing secret (optional if using Socket Mode only) | OPTIONAL |
+| NOTION_TOKEN | Notion API integration token | YES |
+| CHANNEL_DB_MAPPINGS | Enable multi-channel mode (true/false, default: false) | OPTIONAL |
+| CHANNEL_DB_MAPPINGS_FILE | Path to channel mappings JSON (default: ./channel-mappings.json) | OPTIONAL |
+| WATCH_CHANNEL_ID | Slack channel ID to monitor (single-channel mode only) | YES (single-channel) |
+| NOTION_DATABASE_ID | Target Notion database ID (single-channel mode only) | YES (single-channel) |
+| ALLOW_THREADS | Allow parsing inside threads (true/false, default: false) | OPTIONAL |
+| API_TIMEOUT | Timeout for API calls in ms (default: 10000) | OPTIONAL |
+| SCHEMA_CACHE_TTL | Schema cache TTL in ms (default: 3600000 = 1 hour) | OPTIONAL |
+| HEALTH_PORT | Port for health check server (default: 1987) | OPTIONAL |
+| PORT | Port for main app (default: 1987) | OPTIONAL |
+| LOG_LEVEL | Logging level: trace, debug, info, warn, error (default: info) | OPTIONAL |
 
 Store these in `.env` or a secret manager (Doppler, Vault, etc).
 
@@ -169,7 +169,7 @@ Store these in `.env` or a secret manager (Doppler, Vault, etc).
 
 `/invite @On-Call Cat`
 
-## 🚀 Running Locally
+## Running Locally
 
 ### Step 1: Install dependencies
 
@@ -439,7 +439,7 @@ npm run logs
 
 Deploy to GCP Cloud Run for production-ready, auto-scaling serverless deployment.
 
-#### 🚀 Quick Start
+#### Quick Start
 
 **New users:** Follow the step-by-step guide in [GETTING_STARTED.md](GETTING_STARTED.md)
 
@@ -452,7 +452,6 @@ git push origin main     # Auto-deploys to staging
 **Benefits:**
 - Push to main → automatic build and deploy
 
-```
 **Features:**
 - Automated staging → production pipeline with approval gates
 - Infrastructure as code (no manual console configuration)
@@ -492,7 +491,7 @@ npm start
 
 ## Folder Structure
 
-```
+```shell
 on-call-cat/
 ├── app.js                        # Main application entry point
 ├── package.json                  # Dependencies and scripts

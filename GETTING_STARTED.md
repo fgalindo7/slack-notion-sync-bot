@@ -13,19 +13,19 @@ Ensure you have:
 - Slack workspace with admin access
 - Notion workspace with integration created
 
-## ✓ Step 1: Install Dependencies
+## Step 1: Install Dependencies
 
 ```shell
 npm install
 ```
 
-## ✓ Step 2: Test Your Setup (Optional)
+## Step 2: Test Your Setup (Optional)
 
 ```shell
 npm run lint && npm test
 ```
 
-## ✓ Step 3: Authenticate with GCP
+## Step 3: Authenticate with GCP
 
 ```shell
 gcloud auth login
@@ -36,7 +36,7 @@ export REGION="us-central1"
 gcloud config set project $GCP_PROJECT_ID
 ```
 
-## ✓ Step 4: Run Infrastructure Setup
+## Step 4: Run Infrastructure Setup
 
 ```shell
 npm run infra:setup
@@ -49,7 +49,7 @@ npm run infra:setup
 
 The script will enable APIs, create repositories, and prompt for secrets.
 
-## ✓ Step 5: Grant IAM Permissions
+## Step 5: Grant IAM Permissions
 
 Copy and run the IAM commands displayed by the setup script. They grant Cloud Build permission to deploy, Cloud Run permission to access secrets, and Cloud Deploy permissions for automated deployments.
 
@@ -89,7 +89,7 @@ gcloud iam service-accounts add-iam-policy-binding \
 
 > **See detailed explanations in:** [infrastructure/README.md - Step 4](infrastructure/README.md#step-4-grant-iam-permissions)
 
-## ✓ Step 6: Connect GitHub Repository
+## Step 6: Connect GitHub Repository
 
 **Must use Console** (requires OAuth authorization):
 
@@ -103,7 +103,7 @@ gcloud iam service-accounts add-iam-policy-binding \
    - Configuration: `cloudbuild.yaml`
 6. Click **"Create"**
 
-## ✓ Step 7: Initialize Cloud Deploy Pipeline
+## Step 7: Initialize Cloud Deploy Pipeline
 
 ```shell
 npm run deploy:init
@@ -111,7 +111,7 @@ npm run deploy:init
 
 This creates the staging → production deployment pipeline.
 
-## ✓ Step 8: Test Automated Deployment
+## Step 8: Test Automated Deployment
 
 ```shell
 # Make a test change and push
@@ -126,7 +126,7 @@ npm run deploy:list
 
 Monitor in [Cloud Build Console](https://console.cloud.google.com/cloud-build/builds) and [Cloud Deploy Console](https://console.cloud.google.com/deploy/delivery-pipelines).
 
-## ✓ Step 9: Promote to Production (Optional)
+## Step 9: Promote to Production (Optional)
 
 ```shell
 npm run deploy:list  # Find release name
@@ -136,7 +136,7 @@ gcloud deploy releases promote \
   --release=<RELEASE_NAME>
 ```
 
-## ✓ Step 10: Verify Deployment
+## Step 10: Verify Deployment
 
 ```shell
 SERVICE_URL=$(gcloud run services describe oncall-cat --region=$REGION --format='value(status.url)')

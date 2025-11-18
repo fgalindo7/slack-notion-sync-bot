@@ -10,6 +10,8 @@ import { promisify } from 'util';
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import boxen from 'boxen';
+import icons from '../lib/ascii-icons.js';
+import { getCatFrame } from '../lib/ascii-art.js';
 
 const execAsync = promisify(exec);
 
@@ -53,15 +55,7 @@ const colors = {
   gray: '\x1b[90m',
 };
 
-// ASCII art icons for GCP services
-const icons = {
-  cloudRun: '[CR]',
-  cloudDeploy: '[CD]',
-  cloudBuild: '[CB]',
-  app: '[APP]',
-  git: '[GIT]',
-  link: '->',
-};
+// icons come from centralized library
 
 /**
  * Create terminal hyperlink (OSC 8) if supported
@@ -111,7 +105,7 @@ const flags = {
 };
 
 // Track whether we've rendered once in watch mode to reduce flicker
-let HAS_RENDERED = false;
+// Removed HAS_RENDERED (unused) to satisfy lint
 
 /**
  * Execute gcloud command and return parsed output
@@ -750,19 +744,11 @@ async function renderDashboard() {
     console.clear();
   }
 
-  // ASCII art cat logo (only in dashboard mode)
+  // ASCII art cat logo, animated in watch mode and static in single run
   if (!flags.json) {
-    const catLogo = [
-      '       /\\_/\\  ',
-      '      ( o.o ) ',
-      '       > ^ <  ',
-    ];
-
-    // In watch mode, show the cat only on the first render to reduce flicker
-    if (!flags.watch || !HAS_RENDERED) {
-      console.log('');
-      catLogo.forEach(line => console.log(`  ${colors.cyan}${line}${colors.reset}`));
-    }
+    const frame = getCatFrame();
+    console.log('');
+    frame.forEach(line => console.log(`  ${colors.cyan}${line}${colors.reset}`));
   }
   
   // Fetch all data
@@ -830,16 +816,16 @@ async function renderDashboard() {
                      cloudDeploy?.renderState === 'SUCCEEDED';
   
   if (allHealthy) {
-    console.log(`${colors.green}[OK] All systems operational${colors.reset}`);
+    console.log(`${colors.green}${icons.ok} All systems operational${colors.reset}`);
   } else {
-    console.log(`${colors.yellow}⚠️  Some issues detected - review above${colors.reset}`);
+    console.log(`${colors.yellow}${icons.warn} Some issues detected - review above${colors.reset}`);
   }
   
   if (flags.watch) {
     console.log(`\n${colors.gray}Refreshing in ${flags.interval / 1000}s... (Ctrl+C to exit)${colors.reset}`);
   }
 
-  HAS_RENDERED = true;
+  // render complete
 }
 
 /**
@@ -860,9 +846,12 @@ async function main() {
   }
   
   if (flags.watch) {
-    // Watch mode - refresh periodically
+    // Watch mode - refresh periodically (full redraw for animation)
     await renderDashboard();
-    setInterval(renderDashboard, flags.interval);
+    setInterval(async () => {
+      console.clear();
+      await renderDashboard();
+    }, flags.interval);
   } else {
     // Single run
     await renderDashboard();

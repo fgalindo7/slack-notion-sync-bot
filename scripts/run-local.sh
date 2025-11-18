@@ -8,6 +8,7 @@
 #   ./scripts/run-local.sh health    # check local health
 #
 set -e
+. "$(dirname "$0")/ascii.sh"
 
 SERVICE="oncall-auto"
 PORT=1987
@@ -24,20 +25,20 @@ function need_env() {
 case "$cmd" in
   up)
     need_env
-    echo "👉 Starting $SERVICE on port $PORT..."
+    echo "$NEXT Starting $SERVICE on port $PORT..."
     docker compose up -d --build
-    echo "⏳ Waiting for health..."
+    echo "$WAIT Waiting for health..."
     for i in {1..20}; do
       if curl -sSf http://localhost:$PORT/health >/dev/null 2>&1; then
-        echo "[OK] Healthy at http://localhost:$PORT/health"
+        echo "$OK Healthy at http://localhost:$PORT/health"
         exit 0
       fi
       sleep 2
     done
-    echo "    Health endpoint not responding yet. Check logs: ./scripts/run-local.sh logs"
+    echo "    $WARN Health endpoint not responding yet. Check logs: ./scripts/run-local.sh logs"
     ;;
   down)
-    echo "    Stopping $SERVICE..."
+    echo "    $INFO Stopping $SERVICE..."
     docker compose down
     ;;
   logs)
@@ -45,7 +46,7 @@ case "$cmd" in
     docker compose logs -f $SERVICE
     ;;
   health)
-    echo "    Local health:"
+    echo "    $INFO Local health:"
     curl -s http://localhost:$PORT/health | jq . 2>/dev/null || curl -s http://localhost:$PORT/health
     echo
     ;;

@@ -24,6 +24,9 @@ npm run health:watch
 
 # JSON output (for automation - use --silent to suppress npm output)
 npm run health:json --silent
+
+# Preflight with Slack validation (scopes + channel access)
+npm run preflight:slack
 ```
 
 ### Custom Options
@@ -298,6 +301,24 @@ npm run health
 ```
 
 ### Issue: "All builds show [MANUAL]"
+
+### Issue: "Slack channels not responding / missing events"
+
+**Cause:** Missing Slack scopes (e.g., `channels:read`) or bot not a member of target channels.
+
+**Solution:**
+
+```shell
+# Validate Slack token and scopes; checks mapped channels access
+export SLACK_BOT_TOKEN=$(gcloud secrets versions access latest --secret=slack-bot-token)
+npm run preflight:slack
+
+# If you see "[Slack] Slack scope missing: channels:read"
+# 1) Add channels:read to the Slack app in OAuth & Permissions
+# 2) Reinstall the app to the workspace
+# 3) Rotate the bot token in Secret Manager and redeploy
+```
+
 
 **Cause:** GitHub App trigger not connected
 

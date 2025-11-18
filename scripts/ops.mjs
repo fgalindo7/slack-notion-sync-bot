@@ -4,6 +4,9 @@
  * Commands: health, logs, start, stop, build, deploy, status
  */
 import { exec } from 'child_process';
+import { readFile } from 'fs/promises';
+import { fileURLToPath } from 'url';
+import path from 'path';
 import { colorizeLine } from '../lib/status-colors.js';
 import { promisify } from 'util';
 
@@ -201,12 +204,91 @@ async function main() {
       if (!hasDeployActAs) { problems.push('Cloud Deploy service agent lacks ActAs on runtime SA'); }
       if (!pipelineOk) { problems.push(`Pipeline '${pipelineName}' not readable (check existence or permissions)`); }
 
+      // Optional Slack preflight (--slack)
+      if (flags.slack) {
+        const slackProblems = [];
+        const token = process.env.SLACK_BOT_TOKEN;
+        if (!token) {
+          slackProblems.push('Missing SLACK_BOT_TOKEN environment variable');
+        } else {
+          const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/x-www-form-urlencoded' };
+          try {
+            // auth.test
+            const authRes = await globalThis.fetch('https://slack.com/api/auth.test', { headers });
+            const authJson = await authRes.json();
+            if (!authJson.ok) {
+              slackProblems.push(`Slack auth.test failed: ${authJson.error || 'unknown_error'}`);
+            }
+          } catch (e) {
+            slackProblems.push(`Slack auth.test error: ${e.message || e}`);
+          }
+
+          try {
+            // conversations.list minimal call to detect channels:read
+            const listRes = await globalThis.fetch('https://slack.com/api/conversations.list?limit=1&types=public_channel,private_channel', { headers });
+            const listJson = await listRes.json();
+            if (!listJson.ok && listJson.error === 'missing_scope') {
+              slackProblems.push('Slack scope missing: channels:read (required to enumerate channels)');
+            } else if (!listJson.ok) {
+              slackProblems.push(`Slack conversations.list failed: ${listJson.error || 'unknown_error'}`);
+            }
+          } catch (e) {
+            slackProblems.push(`Slack conversations.list error: ${e.message || e}`);
+          }
+
+          // Validate access to mapped channels via conversations.history (tests channels:history + membership)
+          try {
+            let mapping;
+            if (process.env.CHANNEL_DB_MAPPINGS) {
+              try { mapping = JSON.parse(process.env.CHANNEL_DB_MAPPINGS); } catch { /* ignore */ }
+            }
+            if (!mapping) {
+              const __filename = fileURLToPath(import.meta.url);
+              const __dirname = path.dirname(__filename);
+              const mappingPath = path.resolve(__dirname, '../channel-mappings.json');
+              const raw = await readFile(mappingPath);
+              mapping = JSON.parse(raw.toString());
+            }
+            const channels = (mapping.databases || [])
+              .flatMap(d => (d.channels || []).map(c => c.channelId))
+              .filter(Boolean);
+            const toCheck = [...new Set(channels)].slice(0, 15); // cap checks
+            for (const ch of toCheck) {
+              const histRes = await globalThis.fetch('https://slack.com/api/conversations.history', {
+                method: 'POST',
+                headers,
+                body: new globalThis.URLSearchParams({ channel: ch, limit: '1' })
+              });
+              const histJson = await histRes.json();
+              if (!histJson.ok) {
+                const err = histJson.error || 'unknown_error';
+                if (err === 'channel_not_found') {
+                  slackProblems.push(`Slack channel not found or inaccessible: ${ch}`);
+                } else if (err === 'not_in_channel') {
+                  slackProblems.push(`Bot is not a member of channel: ${ch}`);
+                } else if (err === 'missing_scope') {
+                  slackProblems.push('Slack scope missing: channels:history (required to read channel history)');
+                } else {
+                  slackProblems.push(`conversations.history failed for ${ch}: ${err}`);
+                }
+              }
+            }
+          } catch (e) {
+            slackProblems.push(`Slack channel access check error: ${e.message || e}`);
+          }
+        }
+        if (slackProblems.length) {
+          problems.push(...slackProblems.map(p => `[Slack] ${p}`));
+        }
+      }
+
       if (problems.length) {
         console.error(colorizeLine('[ERR] Preflight failed'));
         for (const p of problems) { console.error(colorizeLine(` - ${p}`)); }
         process.exit(1);
       } else {
-        console.log(colorizeLine('[OK] Preflight passed: IAM & pipeline checks satisfied'));
+        const okMsg = flags.slack ? '[OK] Preflight passed: IAM, pipeline, and Slack checks satisfied' : '[OK] Preflight passed: IAM & pipeline checks satisfied';
+        console.log(colorizeLine(okMsg));
       }
       return;
     }

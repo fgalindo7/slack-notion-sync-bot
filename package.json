@@ -21,6 +21,7 @@
     "deploy:init": "node infrastructure/deploy-automation.mjs init",
     "deploy": "node scripts/ops.mjs deploy",
     "preflight": "node scripts/ops.mjs preflight",
+    "preflight:slack": "node scripts/ops.mjs preflight --slack",
     "deploy:list": "node infrastructure/deploy-automation.mjs list",
     "deploy:status": "node infrastructure/deploy-automation.mjs status",
     "health": "node scripts/ops.mjs health",

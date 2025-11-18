@@ -70,19 +70,28 @@ lib/
 app.js                 # Main entry point - Socket Mode, Notion integration
 ```
 
-### Deployment Automation
+### Deployment & Ops (npm)
 
 ```shell
-# Interactive wizard (8 steps)
-./scripts/setup-and-deploy.sh
+# Local lifecycle
+npm run start      # build + start local container
+npm run stop       # stop local container
+npm run build      # build local image
 
-# Selective deployment
-./scripts/setup-and-deploy.sh --required-secrets
-./scripts/setup-and-deploy.sh --build-image --deploy
+# Health & logs
+npm run health     # TARGET=gcp (default) or TARGET=local
+npm run logs       # TARGET=gcp (default) or TARGET=local
 
-# Health checks
-./scripts/check-health.sh
-./scripts/view-logs.sh
+# Deploy to GCP (uses existing pipeline)
+npm run deploy
+
+# Extras
+# Preview commands without executing (dry-run)
+DRY_RUN=1 npm run deploy
+node scripts/ops.mjs logs --target=gcp --dry-run
+
+# Self-test the ops CLI
+npm run test:cli
 ```
 
 ---
@@ -582,28 +591,25 @@ Agent:
 #### Phase 5: Deployment (Automation Scripts)
 
 ```shell
-# Option 1: Full wizard
-./scripts/setup-and-deploy.sh
-
-# Option 2: Rebuild and deploy
-./scripts/setup-and-deploy.sh --build-image --deploy
+# Full deploy to staging via pipeline
+npm run deploy
 ```
 
 #### Phase 6: Monitoring (Scripts + Chat)
 
 ```shell
 # Check deployment health
-./scripts/check-health.sh
+npm run health      # TARGET=gcp
 
 # View logs
-./scripts/view-logs.sh
+npm run logs        # TARGET=gcp
 ```
 
 ```
 User: "Check if the bot is processing messages correctly"
 
 Agent:
-1. Runs: ./scripts/check-health.sh
+1. Runs: npm run health
 2. Analyzes: Metrics and success rate
 3. Identifies: Any errors or anomalies
 4. Suggests: Fixes or optimizations

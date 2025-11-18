@@ -106,6 +106,8 @@ const flags = {
   watch: args.includes('--watch') || args.includes('-w'),
   section: args.find(arg => arg.startsWith('--section='))?.split('=')[1] || null,
   interval: parseInt(args.find(arg => arg.startsWith('--interval='))?.split('=')[1] || CONFIG.refreshInterval),
+  target: (args.find(a => a.startsWith('--target='))?.split('=')[1] || '').toLowerCase(),
+  url: (args.find(a => a.startsWith('--url='))?.split('=')[1] || ''),
 };
 
 /**
@@ -138,7 +140,11 @@ async function getIdentityToken() {
 
 async function fetchAppHealth(serviceUrl) {
   try {
-    let url = serviceUrl;
+    let url = serviceUrl || flags.url;
+    // Local target override
+    if (!url && flags.target === 'local') {
+      url = 'http://localhost:1987';
+    }
     if (!url) {
       url = await gcloud(
         `run services describe ${CONFIG.serviceName} --region=${CONFIG.region} --format='value(status.url)'`
@@ -148,7 +154,9 @@ async function fetchAppHealth(serviceUrl) {
       return { ok: false, error: 'Missing service URL' };
     }
 
-    const idToken = await getIdentityToken();
+    // Use identity token only for GCP/https URLs
+    const isLocal = url.startsWith('http://localhost') || url.startsWith('http://127.0.0.1');
+    const idToken = !isLocal ? await getIdentityToken() : null;
     const curlAuth = idToken
       ? `curl -s -H "Authorization: Bearer ${idToken}" "${url}/health"`
       : `curl -s "${url}/health"`;

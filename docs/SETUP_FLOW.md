@@ -284,7 +284,7 @@ vim channel-mappings.json
 - **First time**: Let the wizard guide you through everything
 - **Updating secrets**: Use `./scripts/create-secrets.sh` directly
 - **Updating mappings**: Edit file, then re-run wizard (skip to Step 5)
-- **Testing changes**: Deploy updates, then check logs: `./scripts/view-logs.sh --follow`
+- **Testing changes**: Deploy updates, then check logs: `npm run logs -- --follow`
 
 ## Files Involved
 

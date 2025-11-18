@@ -162,7 +162,7 @@ Promote to production via the [Cloud Deploy Console](https://console.cloud.googl
 ### Next Steps
 
 - **Operations Guide:** [infrastructure/README.md](infrastructure/README.md)
-- **Monitoring:** Use `./scripts/check-health.sh` and `./scripts/view-logs.sh`
+- **Monitoring:** Use `npm run health` and `npm run logs` (set `TARGET=local` for local container)
 
 ## Common Issues
 

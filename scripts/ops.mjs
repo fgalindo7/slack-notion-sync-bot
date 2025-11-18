@@ -76,7 +76,12 @@ async function cmdLogs(flags) {
     return;
   }
   // GCP logs via Cloud Logging
-  const query = `resource.type=cloud_run_revision AND resource.labels.service_name=oncall-cat`;
+  const includeRequests = Boolean(flags['include-requests']);
+  let query = `resource.type=cloud_run_revision AND resource.labels.service_name=oncall-cat`;
+  if (!includeRequests) {
+    // Default to stdout only (exclude request logs) for clearer app logs
+    query += ` AND logName:\"run.googleapis.com%2Fstdout\"`;
+  }
   if (flags.follow) {
     process.stdout.write('Following Cloud Run logs (Ctrl+C to stop)\n');
     if (DRY_RUN) {
@@ -86,7 +91,7 @@ async function cmdLogs(flags) {
     // Stream with tail in follow mode and pretty-print
     await run(`gcloud logging tail "${query}" --format=json 2>/dev/null | node scripts/pretty-gcp-logs.mjs`);
   } else {
-    await run(`gcloud logging read "${query}" --limit=50 --format=json --freshness=1h | node scripts/pretty-gcp-logs.mjs`);
+    await run(`gcloud logging read "${query}" --limit=50 --format=json --freshness=1h | node scripts/pretty-gcp-logs.mjs --batch`);
   }
 }
 

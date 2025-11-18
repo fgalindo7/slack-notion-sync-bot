@@ -6,6 +6,8 @@
 
 import readline from 'readline';
 
+const isBatch = process.argv.includes('--batch');
+
 const colors = {
   reset: '\u001b[0m', dim: '\u001b[2m',
   gray: '\u001b[90m', white: '\u001b[37m',
@@ -90,16 +92,43 @@ function pretty(entry) {
   return `${when} ${level} ${src} ${event} ${msg}${tail}`.replace(/\s+/g, ' ').trim();
 }
 
-const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
-rl.on('line', (line) => {
-  if (!line.trim()) { return; }
-  try {
-    const obj = JSON.parse(line);
-    console.log(pretty(obj));
-  } catch {
-    // Not JSON; print raw
-    console.log(line);
-  }
-});
-
-rl.on('close', () => process.exit(0));
+if (isBatch) {
+  // Accumulate entire stdin, parse once (supports JSON array from gcloud read)
+  let data = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', chunk => { data += chunk; });
+  process.stdin.on('end', () => {
+    const text = (data || '').trim();
+    if (!text) { process.exit(0); }
+    try {
+      const parsed = JSON.parse(text);
+      if (Array.isArray(parsed)) {
+        for (const entry of parsed) {
+          console.log(pretty(entry));
+        }
+      } else {
+        console.log(pretty(parsed));
+      }
+    } catch {
+      // Fallback to line-by-line if not valid JSON
+      for (const line of text.split(/\r?\n/)) {
+        if (!line.trim()) { continue; }
+        try { console.log(pretty(JSON.parse(line))); } catch { console.log(line); }
+      }
+    }
+  });
+} else {
+  // Stream mode (NDJSON from gcloud tail)
+  const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+  rl.on('line', (line) => {
+    if (!line.trim()) { return; }
+    try {
+      const obj = JSON.parse(line);
+      console.log(pretty(obj));
+    } catch {
+      // Not JSON; print raw
+      console.log(line);
+    }
+  });
+  rl.on('close', () => process.exit(0));
+}

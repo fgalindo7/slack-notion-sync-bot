@@ -192,8 +192,7 @@ async function cmdPreflight(cli) {
   if (flags.slack) {
     const slackProblems = [];
     const token = process.env.SLACK_BOT_TOKEN;
-    if (!token) { slackProblems.push('Missing SLACK_BOT_TOKEN environment variable'); }
-    else if (cli.dryRun) {
+    if (cli.dryRun) {
       await cli.run('echo slack-preflight-check auth.test');
       await cli.run('echo slack-preflight-check conversations.list');
       try {
@@ -206,6 +205,7 @@ async function cmdPreflight(cli) {
         // ignore
       }
     } else {
+      if (!token) { slackProblems.push('Missing SLACK_BOT_TOKEN environment variable'); }
       const headers = { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/x-www-form-urlencoded' };
       try {
         const authRes = await globalThis.fetch('https://slack.com/api/auth.test', { headers });

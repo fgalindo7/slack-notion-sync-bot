@@ -41,7 +41,7 @@ steps:
       - 'deploy'
       - 'releases'
       - 'create'
-      - 'release-${SHORT_SHA}'
+      - 'release-${SHORT_SHA}-${BUILD_ID}'
       - '--delivery-pipeline=${_PIPELINE_NAME}'
       - '--region=${_REGION}'
       - '--images=oncall-cat=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/app:${SHORT_SHA}'

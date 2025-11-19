@@ -38,17 +38,25 @@ async function cmdLogs(cli) {
   const flags = cli.flags;
   if (flags.target === 'local') {
     const follow = flags.follow ? '-f' : '';
-    await cli.run(`docker compose logs ${follow} oncall-auto | npx pino-pretty --singleLine --translateTime "SYS:yyyy-mm-dd HH:MM:ss.l" --ignore "pid,hostname" --colorize`);
+    const cmd = `docker compose logs ${follow} oncall-auto | npx pino-pretty --singleLine --translateTime "SYS:yyyy-mm-dd HH:MM:ss.l" --ignore "pid,hostname" --colorize`;
+    if (flags.follow) {
+      await cli.runStreaming(cmd);
+    } else {
+      await cli.run(cmd);
+    }
     return;
   }
   const includeRequests = Boolean(flags['include-requests']);
   let query = `resource.type=cloud_run_revision AND resource.labels.service_name=oncall-cat`;
   if (!includeRequests) { query += ` AND logName:\"run.googleapis.com%2Fstdout\"`; }
+  const project = cli.projectId;
   if (flags.follow) {
     process.stdout.write('Following Cloud Run logs (Ctrl+C to stop)\n');
-    await cli.run(`gcloud logging tail "${query}" --format=json 2>/dev/null | node scripts/pretty-gcp-logs.mjs || true`);
+    // Use beta track for tail, which is widely available
+    const cmd = `gcloud beta logging tail "${query}" --project=${project} --format=json | node scripts/pretty-gcp-logs.mjs`;
+    await cli.runStreaming(cmd);
   } else {
-    await cli.run(`gcloud logging read "${query}" --limit=50 --format=json --freshness=1h | node scripts/pretty-gcp-logs.mjs --batch`);
+    await cli.run(`gcloud logging read "${query}" --project=${project} --limit=50 --format=json --freshness=1h | node scripts/pretty-gcp-logs.mjs --batch`);
   }
 }
 
@@ -297,7 +305,7 @@ async function main() {
       reset();
       cli.flags = { target: 'gcp', follow: true };
       await cmdLogs(cli);
-      expect(cli.executed.some(c => c.startsWith('gcloud logging tail') && c.includes('--format=json')), 'logs gcp follow uses tail');
+      expect(cli.executed.some(c => c.includes('logging tail') && c.includes('--format=json')), 'logs gcp follow uses tail');
       expect(cli.executed.some(c => c.includes('scripts/pretty-gcp-logs.mjs') && !c.includes('--batch')), 'logs gcp follow does not use batch');
 
       reset();

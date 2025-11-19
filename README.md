@@ -351,6 +351,32 @@ npm run health:json   # JSON output for automation
 
 See [docs/HEALTH_CHECKS.md](docs/HEALTH_CHECKS.md) for complete documentation.
 
+### CLI Context & Flags Precedence
+
+All ops/infra scripts use a unified context resolver:
+
+- Precedence: flags > gcloud config > environment
+- Example invocations:
+
+```shell
+# Prefer explicit flags (especially in CI)
+node infrastructure/setup-infrastructure.mjs --project <PROJECT_ID> --region us-central1
+
+# Or rely on gcloud config (no flags)
+gcloud config set project <PROJECT_ID>
+node infrastructure/setup-infrastructure.mjs --region us-central1
+
+# DRY_RUN to preview actions
+DRY_RUN=1 node scripts/ops.mjs preflight --target=gcp
+```
+
+Unified commands (via `scripts/ops.mjs`):
+
+- `npm run logs -- [--target=local|gcp] [--follow] [--include-requests]`
+- `npm run health` | `npm run health:watch` | `npm run health:json`
+- `npm run deploy` | `npm run deploy:list` | `npm run deploy:status`
+- `npm run preflight` (Slack + IAM + pipeline checks)
+
 ### HTTP Health Endpoints
 
 The bot also exposes direct HTTP endpoints:
@@ -443,7 +469,7 @@ Deploy to GCP Cloud Run for production-ready, auto-scaling serverless deployment
 
 **New users:** Follow the step-by-step guide in [GETTING_STARTED.md](GETTING_STARTED.md)
 
-**Already deployed?** Just push to main:
+**Already deployed?** Just push to main (ensure Cloud Build trigger is configured):
 
 ```shell
 git push origin main     # Auto-deploys to staging
@@ -461,6 +487,11 @@ git push origin main     # Auto-deploys to staging
 **Documentation:**
 - [GETTING_STARTED.md](GETTING_STARTED.md) - First-time deployment checklist
 - [infrastructure/README.md](infrastructure/README.md) - Operations and reference
+
+Notes:
+- Cloud Build triggers require connecting your GitHub repo in Cloud Build → Triggers.
+- Cloud Deploy expects `clouddeploy.yaml` and `skaffold.yaml` to be valid; verify region and project IDs.
+- Service must listen on port `1987` (standardized across app and health).
 
 ---
 

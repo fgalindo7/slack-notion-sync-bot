@@ -17,8 +17,26 @@ Purpose: Concise reference for provisioning and deploying infrastructure via Nod
 ```shell
 gcloud auth login
 gcloud config set project <PROJECT_ID>
+```
+
+Context resolution precedence used by all infra/ops scripts:
+
+- Flags > gcloud config > environment
+
+Examples:
+
+```shell
+# Explicit flags (recommended for CI or multiple projects)
+node infrastructure/setup-infrastructure.mjs --project <PROJECT_ID> --region us-central1
+
+# Or rely on gcloud config (no flags needed)
+gcloud config set project <PROJECT_ID>
+node infrastructure/setup-infrastructure.mjs --region us-central1
+
+# Env vars are last resort and optional
 export GCP_PROJECT_ID=<PROJECT_ID>
 export REGION=us-central1
+node infrastructure/setup-infrastructure.mjs
 ```
 
 Optional custom Cloud Build service account:
@@ -30,7 +48,14 @@ export CLOUD_BUILD_SA_EMAIL=cloud-build-slack-notion-sync@${GCP_PROJECT_ID}.iam.
 ## One-Time Setup
 
 ```shell
-echo 'y' | node infrastructure/setup-infrastructure.mjs
+# Interactive (recommended locally; will prompt for secrets)
+node infrastructure/setup-infrastructure.mjs --project <PROJECT_ID> --region us-central1
+
+# Non-interactive / automation
+echo 'y' | node infrastructure/setup-infrastructure.mjs --project <PROJECT_ID> --region us-central1
+
+# Dry run (preview actions; no changes made)
+DRY_RUN=1 node infrastructure/setup-infrastructure.mjs --project <PROJECT_ID> --region us-central1
 ```
 
 What this does (minimal set):

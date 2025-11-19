@@ -1,111 +1,73 @@
 #!/usr/bin/env node
 /**
- * @fileoverview GCP Infrastructure Setup - Automated provisioning using GCP JS SDK
+ * @fileoverview GCP Infrastructure Setup - Automated provisioning using GCP JS SDK (refactored with CliContext)
  * Creates and configures all required GCP resources for the On-Call Cat bot
  * including Cloud Run, Cloud Build, Cloud Deploy, Artifact Registry, and Secret Manager
- * @author Francisco Galindo
  */
 
 import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 import { ArtifactRegistryClient } from '@google-cloud/artifact-registry';
 import { CloudBuildClient } from '@google-cloud/cloudbuild';
 import { ServiceManagerClient } from '@google-cloud/service-management';
-import readline from 'readline';
-import { promisify } from 'util';
 import { google } from 'googleapis';
+import { CliContext } from '../lib/cli.js';
+import { logger } from '../lib/cli-logger.js';
+import _fs from 'fs/promises';
 
-// Configuration
-const CONFIG = {
-  projectId: process.env.GCP_PROJECT_ID || process.env.PROJECT_ID,
-  region: process.env.REGION || 'us-central1',
+// Static configuration (project/region filled at runtime)
+const STATIC = {
   serviceName: 'oncall-cat',
   repositoryId: 'oncall-cat',
-  
-  // APIs to enable
   requiredApis: [
-    'run.googleapis.com',               // Cloud Run
-    'artifactregistry.googleapis.com',  // Artifact Registry
-    'secretmanager.googleapis.com',     // Secret Manager
-    'cloudbuild.googleapis.com',        // Cloud Build
-    'clouddeploy.googleapis.com',       // Cloud Deploy
-    'aiplatform.googleapis.com',        // Vertex AI
-    'iam.googleapis.com',               // IAM
+    'run.googleapis.com',
+    'artifactregistry.googleapis.com',
+    'secretmanager.googleapis.com',
+    'cloudbuild.googleapis.com',
+    'clouddeploy.googleapis.com',
+    'aiplatform.googleapis.com',
+    'iam.googleapis.com',
   ],
-  
-  // Required secrets
   requiredSecrets: [
     { name: 'slack-bot-token', description: 'Slack Bot User OAuth Token (xoxb-...)' },
     { name: 'slack-app-token', description: 'Slack App-Level Token (xapp-...)' },
     { name: 'notion-token', description: 'Notion Integration Token (secret_...)' },
   ],
-  
-  // Optional secrets
   optionalSecrets: [
     { name: 'channel-mappings', description: 'Channel to Database mappings JSON (for multi-channel mode)' },
   ],
 };
 
-// Helper: Create readline interface
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout
-});
-const question = promisify(rl.question).bind(rl);
-
-// Check if running in interactive mode
-const isInteractive = process.stdin.isTTY;
-
-// Color output helpers
-const colors = {
-  reset: '\x1b[0m',
-  bright: '\x1b[1m',
-  green: '\x1b[32m',
-  blue: '\x1b[34m',
-  yellow: '\x1b[33m',
-  red: '\x1b[31m',
-};
-
-function log(message, color = 'reset') {
-  console.log(`${colors[color]}${message}${colors.reset}`);
-}
-
-function logSection(title) {
-  console.log('\n' + '='.repeat(60));
-  log(title, 'bright');
-  console.log('='.repeat(60) + '\n');
-}
-
 /**
  * Enable required GCP APIs
  */
-async function enableAPIs() {
-  logSection('Enabling Required GCP APIs');
+async function enableAPIs(cli, config) {
+  logger.section('Enabling Required GCP APIs');
   
   const serviceManagement = new ServiceManagerClient();
   
-  for (const api of CONFIG.requiredApis) {
+  for (const api of STATIC.requiredApis) {
     try {
-      log(`Enabling ${api}...`, 'blue');
+      logger.info(`Enabling ${api}...`);
       
       // Check if already enabled
       const [services] = await serviceManagement.listServices({
-        consumerId: `project:${CONFIG.projectId}`,
+        consumerId: `project:${config.projectId}`,
       });
       
       const isEnabled = services.some(s => s.serviceName === api);
       
       if (isEnabled) {
-        log(`✓ ${api} already enabled`, 'green');
+        logger.success(`✓ ${api} already enabled`);
       } else {
         // Enable the service
         await serviceManagement.enableService({
           serviceName: api,
         });
-        log(`✓ ${api} enabled successfully`, 'green');
+        logger.success(`✓ ${api} enabled successfully`);
       }
     } catch (error) {
-      log(`⚠ Warning: Could not enable ${api}: ${error.message}`, 'yellow');
-      log(`  Please enable manually: gcloud services enable ${api}`, 'yellow');
+      logger.warn(`⚠ Warning: Could not enable ${api}: ${error.message}`);
+      logger.warn(`  Please enable manually: gcloud services enable ${api}`);
     }
   }
 }
@@ -113,12 +75,12 @@ async function enableAPIs() {
 /**
  * Create Artifact Registry repository
  */
-async function createArtifactRegistry() {
-  logSection('Setting Up Artifact Registry');
+async function createArtifactRegistry(cli, config) {
+  logger.section('Setting Up Artifact Registry');
   
   const client = new ArtifactRegistryClient();
-  const parent = `projects/${CONFIG.projectId}/locations/${CONFIG.region}`;
-  const repositoryId = CONFIG.repositoryId;
+  const parent = `projects/${config.projectId}/locations/${config.region}`;
+  const repositoryId = STATIC.repositoryId;
   
   try {
     // Check if repository exists
@@ -126,10 +88,10 @@ async function createArtifactRegistry() {
     
     try {
       await client.getRepository({ name: repositoryName });
-      log(`✓ Artifact Registry repository "${repositoryId}" already exists`, 'green');
+      logger.success(`✓ Artifact Registry repository "${repositoryId}" already exists`);
     } catch (error) {
       if (error.code === 5) { // NOT_FOUND
-        log(`Creating Artifact Registry repository "${repositoryId}"...`, 'blue');
+        logger.info(`Creating Artifact Registry repository "${repositoryId}"...`);
         
         const [operation] = await client.createRepository({
           parent,
@@ -141,15 +103,15 @@ async function createArtifactRegistry() {
         });
         
         await operation.promise();
-        log(`✓ Artifact Registry repository created successfully`, 'green');
+        logger.success(`✓ Artifact Registry repository created successfully`);
       } else {
         throw error;
       }
     }
     
-    log(`\nRepository URL: ${CONFIG.region}-docker.pkg.dev/${CONFIG.projectId}/${repositoryId}`, 'bright');
+    logger.info(`\nRepository URL: ${config.region}-docker.pkg.dev/${config.projectId}/${repositoryId}`);
   } catch (error) {
-    log(`✗ Error creating Artifact Registry: ${error.message}`, 'red');
+    logger.error(`✗ Error creating Artifact Registry: ${error.message}`);
     throw error;
   }
 }
@@ -157,44 +119,45 @@ async function createArtifactRegistry() {
 /**
  * Create or update secrets in Secret Manager
  */
-async function setupSecrets() {
-  logSection('Setting Up Secret Manager');
+async function setupSecrets(cli, config) {
+  logger.section('Setting Up Secret Manager');
   
   const client = new SecretManagerServiceClient();
-  const parent = `projects/${CONFIG.projectId}`;
+  const parent = `projects/${config.projectId}`;
   
   // Process required secrets
-  for (const secretConfig of CONFIG.requiredSecrets) {
-    await createOrUpdateSecret(client, parent, secretConfig, true);
+  for (const secretConfig of STATIC.requiredSecrets) {
+    await createOrUpdateSecret(cli, client, parent, secretConfig, true);
   }
   
   // Ask about optional secrets
-  log('\n--- Optional Secrets ---', 'bright');
+  logger.info('\n--- Optional Secrets ---');
   
-  // Skip optional secrets in non-interactive mode
-  if (!isInteractive) {
-    log('Skipping optional secrets (non-interactive mode)', 'yellow');
+  // Skip optional secrets when not interactive or in dry-run
+  const interactive = process.stdin.isTTY && !cli.dryRun;
+  if (!interactive) {
+    logger.warn('Skipping optional secrets (non-interactive mode)');
     return;
   }
   
   try {
-    const setupOptional = await question('Set up optional secrets (channel-mappings for multi-channel mode)? (y/N): ');
+    const setupOptional = await cli.prompt('Set up optional secrets (channel-mappings for multi-channel mode)? (y/N): ', { defaultValue: 'n' });
     
     if (setupOptional.toLowerCase() === 'y') {
-      for (const secretConfig of CONFIG.optionalSecrets) {
-        await createOrUpdateSecret(client, parent, secretConfig, false);
+      for (const secretConfig of STATIC.optionalSecrets) {
+        await createOrUpdateSecret(cli, client, parent, secretConfig, false);
       }
     }
   } catch {
     // Readline closed - skip optional secrets
-    log('Skipping optional secrets (input closed)', 'yellow');
+    logger.warn('Skipping optional secrets (input closed)');
   }
 }
 
 /**
  * Create or update a single secret
  */
-async function createOrUpdateSecret(client, parent, secretConfig, required) {
+async function createOrUpdateSecret(cli, client, parent, secretConfig, required) {
   const secretName = `${parent}/secrets/${secretConfig.name}`;
   
   try {
@@ -203,28 +166,29 @@ async function createOrUpdateSecret(client, parent, secretConfig, required) {
     try {
       await client.getSecret({ name: secretName });
       secretExists = true;
-      log(`✓ Secret "${secretConfig.name}" already exists`, 'green');
+      logger.success(`✓ Secret "${secretConfig.name}" already exists`);
       
+      const interactive = process.stdin.isTTY && !cli.dryRun;
       // In non-interactive mode, skip existing secrets
-      if (!isInteractive) {
-        log(`  Skipping (non-interactive mode)`, 'yellow');
+      if (!interactive) {
+        logger.warn(`  Skipping (non-interactive mode)`);
         return;
       }
       
       // In interactive mode, ask if user wants to update
       try {
-        const update = await question(`  Update value? (y/N): `);
+        const update = await cli.prompt(`  Update value? (y/N): `, { defaultValue: 'n' });
         if (update.toLowerCase() !== 'y') {
           return;
         }
       } catch {
         // Readline closed - treat as "no update"
-        log(`  Skipping update (input closed)`, 'yellow');
+        logger.warn(`  Skipping update (input closed)`);
         return;
       }
     } catch (error) {
       if (error.code === 5) { // NOT_FOUND
-        log(`Creating secret "${secretConfig.name}"...`, 'blue');
+        logger.info(`Creating secret "${secretConfig.name}"...`);
         await client.createSecret({
           parent,
           secretId: secretConfig.name,
@@ -239,28 +203,29 @@ async function createOrUpdateSecret(client, parent, secretConfig, required) {
       }
     }
     
+    const interactive = process.stdin.isTTY && !cli.dryRun;
     // Skip value prompt in non-interactive mode if secret exists
-    if (secretExists && !isInteractive) {
+    if (secretExists && !interactive) {
       return;
     }
     
     // Get secret value from user
-    log(`\n${secretConfig.description}`, 'bright');
+    logger.info(`\n${secretConfig.description}`);
     
     let value;
     try {
-      value = await question(`Enter value for ${secretConfig.name}: `);
+      value = await cli.prompt(`Enter value for ${secretConfig.name}: `);
     } catch {
       // Readline closed - skip this secret
-      log(`  Skipping (input closed)`, 'yellow');
+      logger.warn(`  Skipping (input closed)`);
       if (required && !secretExists) {
-        log(`  ⚠ Warning: Required secret "${secretConfig.name}" not set`, 'yellow');
+        logger.warn(`  ⚠ Warning: Required secret "${secretConfig.name}" not set`);
       }
       return;
     }
     
     if (!value && required && !secretExists) {
-      log(`✗ Value required for ${secretConfig.name}`, 'red');
+      logger.error(`✗ Value required for ${secretConfig.name}`);
       return;
     }
     
@@ -272,13 +237,13 @@ async function createOrUpdateSecret(client, parent, secretConfig, required) {
           data: Buffer.from(value, 'utf8'),
         },
       });
-      log(`✓ Secret value set successfully`, 'green');
+      logger.success(`✓ Secret value set successfully`);
     }
   } catch (error) {
-    log(`✗ Error setting up secret "${secretConfig.name}": ${error.message}`, 'red');
+    logger.error(`✗ Error setting up secret "${secretConfig.name}": ${error.message}`);
     // Don't throw fatal error - continue with remaining secrets
     if (required) {
-      log(`  ⚠ Warning: Required secret failed, but continuing...`, 'yellow');
+      logger.warn(`  ⚠ Warning: Required secret failed, but continuing...`);
     }
   }
 }
@@ -286,16 +251,16 @@ async function createOrUpdateSecret(client, parent, secretConfig, required) {
 /**
  * Set up Cloud Build trigger
  */
-async function setupCloudBuild() {
-  logSection('Setting Up Cloud Build');
+async function setupCloudBuild(cli, config) {
+  logger.section('Setting Up Cloud Build');
   
   const client = new CloudBuildClient();
-  const parent = `projects/${CONFIG.projectId}/locations/${CONFIG.region}`;
+  const parent = `projects/${config.projectId}/locations/${config.region}`;
   
   try {
-    log('Creating Cloud Build trigger...', 'blue');
-    log('Note: GitHub repository connection must be set up manually first', 'yellow');
-    log('Visit: https://console.cloud.google.com/cloud-build/triggers', 'yellow');
+    logger.info('Creating Cloud Build trigger...');
+    logger.warn('Note: GitHub repository connection must be set up manually first');
+    logger.warn('Visit: https://console.cloud.google.com/cloud-build/triggers');
     
     const triggerConfig = {
       name: 'oncall-cat-deploy',
@@ -311,70 +276,52 @@ async function setupCloudBuild() {
     };
     
     // List existing triggers
-    const [triggers] = await client.listBuildTriggers({
-      parent,
-      projectId: CONFIG.projectId,
-    });
+    const [triggers] = await client.listBuildTriggers({ parent, projectId: config.projectId });
     
     const existingTrigger = triggers.find(t => t.name === triggerConfig.name);
     
     if (existingTrigger) {
-      log(`✓ Build trigger "${triggerConfig.name}" already exists`, 'green');
+      logger.success(`✓ Build trigger "${triggerConfig.name}" already exists`);
     } else {
-      log('To create the trigger, run:', 'yellow');
-      log(`  gcloud beta builds triggers create github \\`, 'bright');
-      log(`    --name="${triggerConfig.name}" \\`, 'bright');
-      log(`    --repo-name=slack-notion-sync-bot \\`, 'bright');
-      log(`    --repo-owner=fgalindo7 \\`, 'bright');
-      log(`    --branch-pattern="^main$" \\`, 'bright');
-      log(`    --build-config=cloudbuild.yaml \\`, 'bright');
-      log(`    --region=${CONFIG.region}`, 'bright');
+      logger.warn('To create the trigger, run:');
+      logger.highlight(`  gcloud beta builds triggers create github \\\n    --name="${triggerConfig.name}" \\\n    --repo-name=slack-notion-sync-bot \\\n    --repo-owner=fgalindo7 \\\n    --branch-pattern="^main$" \\\n    --build-config=cloudbuild.yaml \\\n    --region=${config.region}`);
     }
   } catch (error) {
-    log(`⚠ Warning: ${error.message}`, 'yellow');
-    log('Cloud Build trigger must be created manually via console or gcloud CLI', 'yellow');
+    logger.warn(`⚠ Warning: ${error.message}`);
+    logger.warn('Cloud Build trigger must be created manually via console or gcloud CLI');
   }
 }
 
 /**
  * Set up Cloud Deploy pipeline
  */
-async function setupCloudDeploy() {
-  logSection('Setting Up Cloud Deploy');
+async function setupCloudDeploy(cli, config) {
+  logger.section('Setting Up Cloud Deploy');
   
-  log('Cloud Deploy configuration will be created...', 'blue');
-  log('This requires clouddeploy.yaml and skaffold.yaml files', 'yellow');
+  logger.info('Cloud Deploy configuration will be created...');
+  logger.warn('This requires clouddeploy.yaml and skaffold.yaml files');
   
   // Check if files exist
-  const fs = await import('fs/promises');
   const path = await import('path');
   
   const cloudDeployPath = path.join(process.cwd(), 'clouddeploy.yaml');
   const skaffoldPath = path.join(process.cwd(), 'skaffold.yaml');
   
-  try {
-    await fs.access(cloudDeployPath);
-    log(`✓ clouddeploy.yaml found`, 'green');
-  } catch {
-    log(`⚠ clouddeploy.yaml not found - will be created`, 'yellow');
-  }
+  try { await _fs.access(cloudDeployPath); logger.success(`✓ clouddeploy.yaml found`); }
+  catch { logger.warn(`⚠ clouddeploy.yaml not found - will be created`); }
   
-  try {
-    await fs.access(skaffoldPath);
-    log(`✓ skaffold.yaml found`, 'green');
-  } catch {
-    log(`⚠ skaffold.yaml not found - will be created`, 'yellow');
-  }
+  try { await _fs.access(skaffoldPath); logger.success(`✓ skaffold.yaml found`); }
+  catch { logger.warn(`⚠ skaffold.yaml not found - will be created`); }
   
-  log('\nTo deploy the pipeline after creating config files:', 'bright');
-  log(`  gcloud deploy apply --file=clouddeploy.yaml --region=${CONFIG.region}`, 'bright');
+  logger.info('\nTo deploy the pipeline after creating config files:');
+  logger.highlight(`  gcloud deploy apply --file=clouddeploy.yaml --region=${config.region}`);
 }
 
 /**
  * Configure IAM permissions
  */
-async function setupIAMPermissions() {
-  logSection('Setting Up IAM Permissions');
+async function setupIAMPermissions(cli, config) {
+  logger.section('Setting Up IAM Permissions');
 
   // Helper: fetch project number
   async function getProjectNumber(projectId) {
@@ -429,7 +376,7 @@ async function setupIAMPermissions() {
   }
 
   // Compute principal emails
-  const projectId = CONFIG.projectId;
+  const projectId = config.projectId;
   const projectNumber = await getProjectNumber(projectId);
   const defaultCbSa = `${projectNumber}@cloudbuild.gserviceaccount.com`;
   const customCbSa = process.env.CLOUD_BUILD_SA_EMAIL || '';
@@ -437,10 +384,10 @@ async function setupIAMPermissions() {
   const computeSa = `${projectNumber}-compute@developer.gserviceaccount.com`;
   const cloudDeployServiceAgent = `service-${projectNumber}@gcp-sa-clouddeploy.iam.gserviceaccount.com`;
 
-  log(`Project Number: ${projectNumber}`, 'blue');
-  log(`Cloud Build SA: ${cloudBuildSa}${customCbSa ? ' (custom)' : ' (default)'}`, 'blue');
-  log(`Runtime (Compute) SA: ${computeSa}`, 'blue');
-  log(`Cloud Deploy SA: ${cloudDeployServiceAgent}`, 'blue');
+  logger.info(`Project Number: ${projectNumber}`);
+  logger.info(`Cloud Build SA: ${cloudBuildSa}${customCbSa ? ' (custom)' : ' (default)'}`);
+  logger.info(`Runtime (Compute) SA: ${computeSa}`);
+  logger.info(`Cloud Deploy SA: ${cloudDeployServiceAgent}`);
 
   // Ensure project-level roles
   const projectBindings = [
@@ -457,19 +404,13 @@ async function setupIAMPermissions() {
   ];
 
   const changed = await ensureProjectBindings(projectId, projectBindings);
-  if (changed) {
-    log('✓ Project-level IAM bindings updated', 'green');
-  } else {
-    log('✓ Project-level IAM bindings already satisfied', 'green');
-  }
+  if (changed) { logger.success('✓ Project-level IAM bindings updated'); }
+  else { logger.success('✓ Project-level IAM bindings already satisfied'); }
 
   // Ensure Cloud Deploy SA can act as runtime SA (ActAs)
   const saChanged = await ensureServiceAccountBinding(computeSa, cloudDeployServiceAgent, 'roles/iam.serviceAccountUser');
-  if (saChanged) {
-    log('✓ Granted Cloud Deploy SA ActAs on runtime service account', 'green');
-  } else {
-    log('✓ Cloud Deploy SA ActAs on runtime service account already satisfied', 'green');
-  }
+  if (saChanged) { logger.success('✓ Granted Cloud Deploy SA ActAs on runtime service account'); }
+  else { logger.success('✓ Cloud Deploy SA ActAs on runtime service account already satisfied'); }
   // Optional pruning of runtime SA elevated roles
   if (process.env.PRUNE_RUNTIME_ROLES === '1') {
     const pruneRoles = new Set([
@@ -491,39 +432,35 @@ async function setupIAMPermissions() {
       if (filteredMembers.length !== b.members.length) { modified = true; }
       return { ...b, members: filteredMembers };
     });
-    if (modified) {
-      await crm.projects.setIamPolicy({ resource: projectId, requestBody: { policy } });
-      log('✓ Pruned elevated runtime SA roles', 'green');
-    } else {
-      log('✓ No elevated runtime SA roles to prune', 'green');
-    }
+    if (modified) { await crm.projects.setIamPolicy({ resource: projectId, requestBody: { policy } }); logger.success('✓ Pruned elevated runtime SA roles'); }
+    else { logger.success('✓ No elevated runtime SA roles to prune'); }
   } else {
-    log('Runtime role pruning skipped (set PRUNE_RUNTIME_ROLES=1 to enable)', 'yellow');
+    logger.warn('Runtime role pruning skipped (set PRUNE_RUNTIME_ROLES=1 to enable)');
   }
 }
 
 /**
  * Display summary
  */
-function displaySummary() {
-  logSection('Infrastructure Setup Complete!');
+function displaySummary(config) {
+  logger.section('Infrastructure Setup Complete!');
   
-  log('✓ APIs enabled', 'green');
-  log('✓ Artifact Registry created', 'green');
-  log('✓ Secrets configured', 'green');
-  log('✓ Cloud Build ready', 'green');
-  log('✓ Cloud Deploy ready', 'green');
+  logger.success('✓ APIs enabled');
+  logger.success('✓ Artifact Registry created');
+  logger.success('✓ Secrets configured');
+  logger.success('✓ Cloud Build ready');
+  logger.success('✓ Cloud Deploy ready');
   
-  log('\nNext steps:', 'bright');
-  log('1. Create clouddeploy.yaml and skaffold.yaml configuration files', 'blue');
-  log('2. Set up GitHub repository connection in Cloud Build', 'blue');
-  log('3. Grant IAM permissions using the commands shown above', 'blue');
-  log('4. Push code to main branch to trigger automatic deployment', 'blue');
+  logger.info('\nNext steps:');
+  logger.info('1. Create clouddeploy.yaml and skaffold.yaml configuration files');
+  logger.info('2. Set up GitHub repository connection in Cloud Build');
+  logger.info('3. Grant IAM permissions using the commands shown above');
+  logger.info('4. Push code to main branch to trigger automatic deployment');
   
-  log(`\nProject: ${CONFIG.projectId}`, 'bright');
-  log(`Region: ${CONFIG.region}`, 'bright');
-  log(`Service: ${CONFIG.serviceName}`, 'bright');
-  log(`Repository: ${CONFIG.region}-docker.pkg.dev/${CONFIG.projectId}/${CONFIG.repositoryId}`, 'bright');
+  logger.info(`\nProject: ${config.projectId}`);
+  logger.info(`Region: ${config.region}`);
+  logger.info(`Service: ${STATIC.serviceName}`);
+  logger.info(`Repository: ${config.region}-docker.pkg.dev/${config.projectId}/${STATIC.repositoryId}`);
 }
 
 /**
@@ -531,45 +468,36 @@ function displaySummary() {
  */
 async function main() {
   try {
-    // Validate configuration
-    if (!CONFIG.projectId) {
-      log('✗ Error: GCP_PROJECT_ID or PROJECT_ID environment variable not set', 'red');
-      log('Usage: GCP_PROJECT_ID=your-project-id node setup-infrastructure.mjs', 'yellow');
-      process.exit(1);
-    }
-    
-    log('On-Call Cat - GCP Infrastructure Setup', 'bright');
-    log(`Project: ${CONFIG.projectId}`, 'blue');
-    log(`Region: ${CONFIG.region}`, 'blue');
-    
-    const confirm = await question('\nProceed with infrastructure setup? (y/N): ');
+    const cli = await CliContext.bootstrap({ requireProject: true, requireRegion: true });
+    const config = { projectId: cli.projectId, region: cli.region };
+
+    logger.section('On-Call Cat - GCP Infrastructure Setup');
+    logger.info(`Project: ${config.projectId}`);
+    logger.info(`Region: ${config.region}`);
+
+    const confirm = await cli.prompt('\nProceed with infrastructure setup? (y/N): ', { defaultValue: 'n' });
     if (confirm.toLowerCase() !== 'y') {
-      log('Setup cancelled', 'yellow');
+      logger.warn('Setup cancelled');
       process.exit(0);
     }
-    
-    // Execute setup steps
-    await enableAPIs();
-    await createArtifactRegistry();
-    await setupSecrets();
-    await setupCloudBuild();
-    await setupCloudDeploy();
-    await setupIAMPermissions();
-    
-    displaySummary();
-    
+
+    await enableAPIs(cli, config);
+    await createArtifactRegistry(cli, config);
+    await setupSecrets(cli, config);
+    await setupCloudBuild(cli, config);
+    await setupCloudDeploy(cli, config);
+    await setupIAMPermissions(cli, config);
+
+    displaySummary(config);
   } catch (error) {
-    log(`\n✗ Fatal error: ${error.message}`, 'red');
+    logger.error(`\n✗ Fatal error: ${error.message}`);
     console.error(error);
     process.exit(1);
-  } finally {
-    rl.close();
   }
 }
 
-// Run if executed directly
 if (import.meta.url === `file://${process.argv[1]}`) {
   main();
 }
 
-export { main, CONFIG };
+export { main };

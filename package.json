@@ -11,7 +11,7 @@
     "lint:fix": "eslint '**/*.{js,mjs}' --ignore-pattern 'node_modules/' --fix",
     "lint:md": "npx -y markdownlint-cli \"**/*.md\" --ignore node_modules --ignore coverage",
     "lint:no-emoji": "node scripts/lint-no-emoji.mjs",
-    "test": "node lib/parser.test.js && node lib/validation.test.js && node lib/metrics.test.js && node lib/schema-cache.test.js && node lib/config.test.js && node scripts/ops.mjs test",
+    "test": "node lib/parser.test.js && node lib/validation.test.js && node lib/metrics.test.js && node lib/schema-cache.test.js && node lib/config.test.js && node lib/gcp-context.test.js && node lib/cli.test.js && node scripts/check-health.test.mjs && node scripts/ops.mjs test",
     "test:cli": "node scripts/ops.mjs test",
     "test:parser": "node lib/parser.test.js",
     "test:validation": "node lib/validation.test.js",

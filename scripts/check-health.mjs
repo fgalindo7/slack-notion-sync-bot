@@ -12,22 +12,13 @@ import { join } from 'path';
 import boxen from 'boxen';
 import icons from '../lib/ascii-icons.js';
 import { getCatFrame, catFrames } from '../lib/ascii-art.js';
+import { CliContext } from '../lib/cli.js';
+import { logger } from '../lib/cli-logger.js';
 
 const execAsync = promisify(exec);
 
-// Read gcloud config with env fallback
-async function getGcloudConfigValue(key) {
-  try {
-    const { stdout } = await execAsync(`gcloud config get-value ${key} --quiet 2>/dev/null`);
-    const val = stdout.trim();
-    if (!val || val === '(unset)') {
-      return null;
-    }
-    return val;
-  } catch {
-    return null;
-  }
-}
+// Global CLI context (initialized in main)
+let cli = null;
 
 // Configuration
 const CONFIG = {
@@ -92,18 +83,22 @@ function shortenUrl(url, maxLength = 35) {
 
 // boxen handles all box drawing automatically
 
-// CLI arguments
+// Health-specific flags (CliContext still parses project/region/dry-run)
 const args = process.argv.slice(2);
+function flag(name, def = '') {
+  const match = args.find(a => a.startsWith(`--${name}=`));
+  return match ? match.split('=')[1] : def;
+}
 const flags = {
   verbose: args.includes('--verbose') || args.includes('-v'),
   json: args.includes('--json'),
   watch: args.includes('--watch') || args.includes('-w'),
-  section: args.find(arg => arg.startsWith('--section='))?.split('=')[1] || null,
-  interval: parseInt(args.find(arg => arg.startsWith('--interval='))?.split('=')[1] || CONFIG.refreshInterval),
-  target: (args.find(a => a.startsWith('--target='))?.split('=')[1] || '').toLowerCase(),
-  url: (args.find(a => a.startsWith('--url='))?.split('=')[1] || ''),
-  animInterval: parseInt(args.find(arg => arg.startsWith('--anim-interval='))?.split('=')[1] || '650'),
-  animMode: (args.find(a => a.startsWith('--anim-mode='))?.split('=')[1] || 'gentle'),
+  section: flag('section', null),
+  interval: parseInt(flag('interval', String(CONFIG.refreshInterval)), 10),
+  target: flag('target', '').toLowerCase(),
+  url: flag('url', ''),
+  animInterval: parseInt(flag('anim-interval', '650'), 10),
+  animMode: flag('anim-mode', 'gentle'),
 };
 
 // Track whether we've rendered once in watch mode to reduce flicker
@@ -113,24 +108,26 @@ const flags = {
  * Execute gcloud command and return parsed output
  */
 async function gcloud(command) {
-  try {
-    const { stdout, stderr } = await execAsync(`gcloud ${command} 2>&1`);
-    if (stderr && !stdout) {
-      throw new Error(stderr);
-    }
-    return stdout.trim();
-  } catch {
+  if (!cli) {
     return null;
   }
+  const res = await cli.run(`gcloud ${command}`);
+  if (res.exitCode !== 0) {
+    return null;
+  }
+  return (res.stdout || '').trim();
 }
 
 /**
  * Fetch application health from Cloud Run service
  */
 async function getIdentityToken() {
+  if (cli?.dryRun) {
+    return 'dry-run-token';
+  }
   try {
-    const { stdout } = await execAsync('gcloud auth print-identity-token');
-    const token = (stdout || '').trim();
+    const res = await cli.run('gcloud auth print-identity-token');
+    const token = (res.stdout || '').trim();
     return token || null;
   } catch {
     return null;
@@ -138,43 +135,45 @@ async function getIdentityToken() {
 }
 
 async function fetchAppHealth(serviceUrl) {
+  if (cli?.dryRun) {
+    return {
+      ok: true,
+      json: {
+        status: 'healthy',
+        metrics: {
+          messagesProcessed: 0,
+          messagesCreated: 0,
+          messagesUpdated: 0,
+          successRate: '100%',
+          messagesFailed: 0,
+          apiTimeouts: 0,
+          uptimeSeconds: 0,
+        },
+        buildTime: new Date().toISOString(),
+        version: 'dry-run'
+      }
+    };
+  }
   try {
     let url = serviceUrl || flags.url;
-    // Local target override
     if (!url && flags.target === 'local') {
       url = 'http://localhost:1987';
     }
     if (!url) {
-      url = await gcloud(
-        `run services describe ${CONFIG.serviceName} --region=${CONFIG.region} --format='value(status.url)'`
-      );
+      url = await gcloud(`run services describe ${CONFIG.serviceName} --region=${CONFIG.region} --format='value(status.url)'`);
     }
     if (!url) {
       return { ok: false, error: 'Missing service URL' };
     }
-
-    // Use identity token only for GCP/https URLs
     const isLocal = url.startsWith('http://localhost') || url.startsWith('http://127.0.0.1');
     const idToken = !isLocal ? await getIdentityToken() : null;
-    const curlAuth = idToken
-      ? `curl -s -H "Authorization: Bearer ${idToken}" "${url}/health"`
-      : `curl -s "${url}/health"`;
+    const curlAuth = idToken ? `curl -s -H "Authorization: Bearer ${idToken}" "${url}/health"` : `curl -s "${url}/health"`;
     const res = await execAsync(curlAuth);
     const text = res.stdout?.trim() || '';
     if (!text) {
       return { ok: false, error: 'Empty response from /health' };
     }
     if (text.startsWith('<') || /<html/i.test(text)) {
-      if (!idToken) {
-        const retryToken = await getIdentityToken();
-        if (retryToken) {
-          const retry = await execAsync(`curl -s -H "Authorization: Bearer ${retryToken}" "${url}/health"`);
-          const retryText = retry.stdout?.trim() || '';
-          if (retryText && !(retryText.startsWith('<') || /<html/i.test(retryText))) {
-            return { ok: true, json: JSON.parse(retryText) };
-          }
-        }
-      }
       return { ok: false, error: 'Non-JSON response from /health (likely unauthenticated). Try using an identity token.' };
     }
     return { ok: true, json: JSON.parse(text) };
@@ -263,154 +262,111 @@ async function fetchNotionDatabaseTitles(databaseIds) {
  * Fetch Cloud Run service details
  */
 async function fetchCloudRunInfo() {
-  try {
-    const revision = await gcloud(
-      `run services describe ${CONFIG.serviceName} --region=${CONFIG.region} --format='value(status.latestReadyRevisionName)'`
-    );
-    
-    const revisionTime = await gcloud(
-      `run revisions describe ${revision} --region=${CONFIG.region} --format='value(metadata.creationTimestamp)'`
-    );
-    
-    const traffic = await gcloud(
-      `run services describe ${CONFIG.serviceName} --region=${CONFIG.region} --format='json(status.traffic)'`
-    );
-    
-    const resources = await gcloud(
-      `run services describe ${CONFIG.serviceName} --region=${CONFIG.region} ` +
-      `--format='value(spec.template.spec.containers[0].resources.limits.cpu, spec.template.spec.containers[0].resources.limits.memory)'`
-    );
-    
-    const scaling = await gcloud(
-      `run services describe ${CONFIG.serviceName} --region=${CONFIG.region} ` +
-      `--format='value(spec.template.metadata.annotations.autoscaling\\.knative\\.dev/minScale, spec.template.metadata.annotations.autoscaling\\.knative\\.dev/maxScale)'`
-    );
-    
-    const url = await gcloud(
-      `run services describe ${CONFIG.serviceName} --region=${CONFIG.region} --format='value(status.url)'`
-    );
-    
-    const [cpu, memory] = resources ? resources.split('\t') : ['unknown', 'unknown'];
-    const [minScale, maxScale] = scaling ? scaling.split('\t') : ['1', '10'];
-    
+  if (cli?.dryRun) {
     return {
-      revision,
-      revisionTime,
-      traffic: traffic ? JSON.parse(traffic) : [],
-      cpu,
-      memory,
-      minScale: parseInt(minScale),
-      maxScale: parseInt(maxScale),
-      url,
+      revision: 'rev-dry-run',
+      revisionTime: new Date().toISOString(),
+      traffic: { status: { traffic: [{ percent: 100, latestRevision: true }] } },
+      cpu: '1',
+      memory: '512Mi',
+      minScale: 1,
+      maxScale: 3,
+      url: 'https://dry-run.example.com',
       consoleUrl: `https://console.cloud.google.com/run/detail/${CONFIG.region}/${CONFIG.serviceName}?project=${CONFIG.projectId}`,
     };
-  } catch {
-    return null;
   }
+  try {
+    const revision = await gcloud(`run services describe ${CONFIG.serviceName} --region=${CONFIG.region} --format='value(status.latestReadyRevisionName)'`);
+    const revisionTime = revision ? await gcloud(`run revisions describe ${revision} --region=${CONFIG.region} --format='value(metadata.creationTimestamp)'`) : null;
+    const traffic = await gcloud(`run services describe ${CONFIG.serviceName} --region=${CONFIG.region} --format='json(status.traffic)'`);
+    const resources = await gcloud(`run services describe ${CONFIG.serviceName} --region=${CONFIG.region} --format='value(spec.template.spec.containers[0].resources.limits.cpu, spec.template.spec.containers[0].resources.limits.memory)'`);
+    const scaling = await gcloud(`run services describe ${CONFIG.serviceName} --region=${CONFIG.region} --format='value(spec.template.metadata.annotations.autoscaling\\.knative\\.dev/minScale, spec.template.metadata.annotations.autoscaling\\.knative\\.dev/maxScale)'`);
+    const url = await gcloud(`run services describe ${CONFIG.serviceName} --region=${CONFIG.region} --format='value(status.url)'`);
+    const [cpu, memory] = resources ? resources.split('\t') : ['unknown', 'unknown'];
+    const [minScale, maxScale] = scaling ? scaling.split('\t') : ['1', '10'];
+    return { revision, revisionTime, traffic: traffic ? JSON.parse(traffic) : [], cpu, memory, minScale: parseInt(minScale, 10), maxScale: parseInt(maxScale, 10), url, consoleUrl: `https://console.cloud.google.com/run/detail/${CONFIG.region}/${CONFIG.serviceName}?project=${CONFIG.projectId}` };
+  } catch { return null; }
 }
 
 /**
  * Fetch Cloud Deploy pipeline status
  */
 async function fetchCloudDeployInfo() {
+  if (cli?.dryRun) {
+    return {
+      releaseName: 'rel-dry-run',
+      createTime: new Date().toISOString(),
+      renderState: 'SUCCEEDED',
+      targets: [
+        { targetId: 'staging', requireApproval: false, rollout: { state: 'SUCCEEDED' } },
+        { targetId: 'production', requireApproval: true, rollout: { state: 'PENDING' } }
+      ],
+      consoleUrl: `https://console.cloud.google.com/deploy/delivery-pipelines/${CONFIG.region}/${CONFIG.pipelineName}?project=${CONFIG.projectId}`,
+    };
+  }
   try {
-    const releases = await gcloud(
-      `deploy releases list --delivery-pipeline=${CONFIG.pipelineName} --region=${CONFIG.region} --limit=1 --format=json`
-    );
-    
-    if (!releases) {
-      return null;
-    }
-    
+    const releases = await gcloud(`deploy releases list --delivery-pipeline=${CONFIG.pipelineName} --region=${CONFIG.region} --limit=1 --format=json`);
+    if (!releases) { return null; }
     const releaseData = JSON.parse(releases);
     const latestRelease = releaseData[0];
-    
-    if (!latestRelease) {
-      return null;
-    }
-    
+    if (!latestRelease) { return null; }
     const releaseName = latestRelease.name.split('/').pop();
     const createTime = latestRelease.createTime;
     const renderState = latestRelease.renderState;
-    
-    // Get rollout status for each target
-    const rollouts = await gcloud(
-      `deploy rollouts list --delivery-pipeline=${CONFIG.pipelineName} --region=${CONFIG.region} --release=${releaseName} --format=json`
-    );
-    
+    const rollouts = await gcloud(`deploy rollouts list --delivery-pipeline=${CONFIG.pipelineName} --region=${CONFIG.region} --release=${releaseName} --format=json`);
     const rolloutData = rollouts ? JSON.parse(rollouts) : [];
-    
     const targets = latestRelease.targetSnapshots?.map(snapshot => ({
       targetId: snapshot.targetId,
       requireApproval: snapshot.requireApproval || false,
       rollout: rolloutData.find(r => r.targetId === snapshot.targetId),
     })) || [];
-    
-    return {
-      releaseName,
-      createTime,
-      renderState,
-      targets,
-      consoleUrl: `https://console.cloud.google.com/deploy/delivery-pipelines/${CONFIG.region}/${CONFIG.pipelineName}?project=${CONFIG.projectId}`,
-    };
-  } catch {
-    return null;
-  }
+    return { releaseName, createTime, renderState, targets, consoleUrl: `https://console.cloud.google.com/deploy/delivery-pipelines/${CONFIG.region}/${CONFIG.pipelineName}?project=${CONFIG.projectId}` };
+  } catch { return null; }
 }
 
 /**
  * Fetch recent Cloud Build history
  */
 async function fetchCloudBuildInfo() {
-  try {
-    const builds = await gcloud(
-      `builds list --limit=5 --format=json`
-    );
-    
-    if (!builds) {
-      return null;
-    }
-    
-    const buildData = JSON.parse(builds);
-    
+  if (cli?.dryRun) {
     return {
-      recentBuilds: buildData.map(build => ({
-        id: build.id.substring(0, 8),
-        status: build.status,
-        createTime: build.createTime,
-        duration: build.timing?.BUILD?.endTime && build.timing?.BUILD?.startTime
-          ? (new Date(build.timing.BUILD.endTime) - new Date(build.timing.BUILD.startTime)) / 1000
-          : null,
-        commitSha: build.substitutions?.SHORT_SHA || 'unknown',
-        triggerName: build.buildTriggerId ? 'TRIGGER' : 'MANUAL',
-      })),
+      recentBuilds: [
+        { id: 'abcd1234', status: 'SUCCESS', createTime: new Date().toISOString(), duration: 15, commitSha: 'deadbeef', triggerName: 'TRIGGER' },
+        { id: 'efgh5678', status: 'FAILURE', createTime: new Date().toISOString(), duration: 9, commitSha: 'cafebabe', triggerName: 'MANUAL' }
+      ],
       consoleUrl: `https://console.cloud.google.com/cloud-build/builds?project=${CONFIG.projectId}`,
     };
-  } catch {
-    return null;
   }
+  try {
+    const builds = await gcloud(`builds list --limit=5 --format=json`);
+    if (!builds) { return null; }
+    const buildData = JSON.parse(builds);
+    return { recentBuilds: buildData.map(build => ({
+      id: build.id.substring(0, 8),
+      status: build.status,
+      createTime: build.createTime,
+      duration: build.timing?.BUILD?.endTime && build.timing?.BUILD?.startTime ? (new Date(build.timing.BUILD.endTime) - new Date(build.timing.BUILD.startTime)) / 1000 : null,
+      commitSha: build.substitutions?.SHORT_SHA || 'unknown',
+      triggerName: build.buildTriggerId ? 'TRIGGER' : 'MANUAL',
+    })), consoleUrl: `https://console.cloud.google.com/cloud-build/builds?project=${CONFIG.projectId}` };
+  } catch { return null; }
 }
 
 /**
  * Get git information
  */
 async function fetchGitInfo() {
+  if (cli?.dryRun) {
+    const now = new Date().toISOString();
+    return { sha: 'dryrun', branch: 'main', commitTime: now, hasUncommitted: false, githubUrl: `https://github.com/fgalindo7/slack-notion-sync-bot/commit/dryrun` };
+  }
   try {
     const { stdout: currentSha } = await execAsync('git rev-parse --short HEAD');
     const { stdout: currentBranch } = await execAsync('git rev-parse --abbrev-ref HEAD');
     const { stdout: commitTime } = await execAsync('git log -1 --format=%aI');
     const { stdout: status } = await execAsync('git status --porcelain');
-    
-    return {
-      sha: currentSha.trim(),
-      branch: currentBranch.trim(),
-      commitTime: commitTime.trim(),
-      hasUncommitted: status.trim().length > 0,
-      githubUrl: `https://github.com/fgalindo7/slack-notion-sync-bot/commit/${currentSha.trim()}`,
-    };
-  } catch {
-    return null;
-  }
+    return { sha: currentSha.trim(), branch: currentBranch.trim(), commitTime: commitTime.trim(), hasUncommitted: status.trim().length > 0, githubUrl: `https://github.com/fgalindo7/slack-notion-sync-bot/commit/${currentSha.trim()}` };
+  } catch { return null; }
 }
 
 /**
@@ -835,16 +791,11 @@ async function renderDashboard() {
  * Main execution
  */
 async function main() {
-  // Resolve project/region from gcloud first, then env, then defaults
-  const gcProject = await getGcloudConfigValue('project');
-  const gcRunRegion = await getGcloudConfigValue('run/region');
-  const gcComputeRegion = await getGcloudConfigValue('compute/region');
-
-  CONFIG.projectId = gcProject || process.env.GCP_PROJECT_ID || process.env.PROJECT_ID || null;
-  CONFIG.region = gcRunRegion || gcComputeRegion || process.env.REGION || 'us-central1';
-
+  cli = await CliContext.bootstrap({ requireProject: true, requireRegion: true });
+  CONFIG.projectId = cli.projectId;
+  CONFIG.region = cli.region;
   if (!CONFIG.projectId) {
-    console.error(`${colors.red}Error: GCP project is not set in gcloud config and environment (GCP_PROJECT_ID/PROJECT_ID).${colors.reset}`);
+    logger.error('Error: GCP project not resolved');
     process.exit(1);
   }
   
@@ -911,6 +862,6 @@ async function main() {
 }
 
 main().catch(error => {
-  console.error(`${colors.red}Fatal error: ${error.message}${colors.reset}`);
+  logger.error(`Fatal error: ${error.message}`);
   process.exit(1);
 });

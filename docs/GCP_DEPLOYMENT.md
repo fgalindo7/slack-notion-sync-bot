@@ -350,7 +350,6 @@ gcloud iam service-accounts add-iam-policy-binding \
   --role="roles/iam.serviceAccountUser"
 ```
 
-
 ```shell
 # Get service account email
 SA_EMAIL=$(gcloud run services describe oncall-cat \

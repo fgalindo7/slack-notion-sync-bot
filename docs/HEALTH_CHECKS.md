@@ -319,7 +319,6 @@ npm run preflight:slack
 # 3) Rotate the bot token in Secret Manager and redeploy
 ```
 
-
 **Cause:** GitHub App trigger not connected
 
 **Solution:**

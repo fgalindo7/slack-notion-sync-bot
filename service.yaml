@@ -21,7 +21,6 @@ spec:
     spec:
       containerConcurrency: 80
       timeoutSeconds: 300
-      serviceAccountName: 37653837791-compute@developer.gserviceaccount.com
       containers:
         - image: oncall-cat
           ports:

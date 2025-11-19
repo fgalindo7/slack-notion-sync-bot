@@ -17,18 +17,18 @@ build:
     region: us-central1
 deploy:
   cloudrun:
-    projectid: staging-383416
+    projectId: staging-383416
     region: us-central1
 profiles:
   - name: staging
     deploy:
       cloudrun:
-        projectid: staging-383416
+        projectId: staging-383416
         region: us-central1
   - name: production
     deploy:
       cloudrun:
-        projectid: staging-383416
+        projectId: staging-383416
         region: us-central1
 manifests:
   rawYaml:

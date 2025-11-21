@@ -797,6 +797,32 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
   --role="roles/clouddeploy.viewer"
 ```
 
+#### Cloud Deploy rollout fails: "bucket does not exist"
+
+Error example:
+
+```text
+operation failed: failed to download Skaffold Config file from
+"gs://REGION.deploy-artifacts.PROJECT_ID.appspot.com/...":
+bucket "REGION.deploy-artifacts.PROJECT_ID.appspot.com" does not exist: not found
+```
+
+**Root cause:** Cloud Deploy service account doesn't have permissions on the artifacts bucket.
+
+**Fix:**
+
+```bash
+PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')
+BUCKET_NAME="us-central1.deploy-artifacts.${PROJECT_ID}.appspot.com"
+
+# Grant Cloud Deploy SA storage.objectAdmin on the artifacts bucket
+gsutil iam ch serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-clouddeploy.iam.gserviceaccount.com:roles/storage.objectAdmin \
+  gs://${BUCKET_NAME}/
+
+# Verify the permission was added
+gsutil iam get gs://${BUCKET_NAME}/ | grep clouddeploy
+```
+
 #### Runtime SA permission errors
 
 ```bash

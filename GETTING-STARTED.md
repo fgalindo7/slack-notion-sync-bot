@@ -123,7 +123,30 @@ npm run deploy:init
 
 This creates the staging → production deployment pipeline.
 
-## Step 8: Test Automated Deployment
+**Important:** After creating the pipeline, grant Cloud Deploy service account access to the artifacts bucket:
+
+```shell
+PROJECT_NUMBER=$(gcloud projects describe $GCP_PROJECT_ID --format='value(projectNumber)')
+BUCKET_NAME="us-central1.deploy-artifacts.${GCP_PROJECT_ID}.appspot.com"
+
+gsutil iam ch serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-clouddeploy.iam.gserviceaccount.com:roles/storage.objectAdmin \
+  gs://${BUCKET_NAME}/
+```
+
+This allows Cloud Deploy to store and retrieve Skaffold configurations.
+
+## Step 8: Test Deployment Locally (Optional)
+
+Before pushing to GitHub, you can test the build and deployment locally:
+
+```shell
+# Test full build + deploy process
+npm run deploy:cloud
+```
+
+See [docs/TESTING-BUILDS.md](docs/TESTING-BUILDS.md) for comprehensive testing workflows.
+
+## Step 9: Test Automated Deployment
 
 The automated deployment uses native Cloud Build with gcloud commands ([cloudbuild.yaml](cloudbuild.yaml)) that:
 - Builds Docker image with commit SHA and latest tags
@@ -143,7 +166,7 @@ npm run deploy:list
 
 Monitor in [Cloud Build Console](https://console.cloud.google.com/cloud-build/builds) and [Cloud Deploy Console](https://console.cloud.google.com/deploy/delivery-pipelines).
 
-## Step 9: Promote to Production (Optional)
+## Step 10: Promote to Production (Optional)
 
 ```shell
 npm run deploy:list  # Find release name
@@ -153,7 +176,7 @@ gcloud deploy releases promote \
   --release=<RELEASE_NAME>
 ```
 
-## Step 10: Verify Deployment
+## Step 11: Verify Deployment
 
 ```shell
 SERVICE_URL=$(gcloud run services describe oncall-cat --region=$REGION --format='value(status.url)')

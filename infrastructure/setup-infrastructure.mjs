@@ -430,6 +430,47 @@ async function setupIAMPermissions(cli, config) {
     return false;
   }
 
+  // Helper: ensure Cloud Deploy SA has access to artifacts bucket
+  async function ensureCloudDeployBucketAccess(config, cloudDeployServiceAgent) {
+    const bucketName = `${config.region}.deploy-artifacts.${config.projectId}.appspot.com`;
+
+    logger.info(`Checking Cloud Deploy SA access to gs://${bucketName}/...`);
+
+    try {
+      // Check if bucket exists first
+      const { execSync } = await import('child_process');
+      try {
+        execSync(`gsutil ls gs://${bucketName}/ > /dev/null 2>&1`, { encoding: 'utf8' });
+      } catch {
+        logger.warn(`⚠ Bucket gs://${bucketName}/ does not exist yet`);
+        logger.info('  Bucket will be created automatically by Cloud Deploy on first use');
+        logger.info('  Run this command after the first deployment:');
+        logger.info(`  gsutil iam ch serviceAccount:${cloudDeployServiceAgent}:roles/storage.objectAdmin gs://${bucketName}/`);
+        return;
+      }
+
+      // Check if Cloud Deploy SA already has access
+      const currentPolicy = execSync(`gsutil iam get gs://${bucketName}/`, { encoding: 'utf8' });
+      if (currentPolicy.includes(cloudDeployServiceAgent)) {
+        logger.success(`✓ Cloud Deploy SA already has access to artifacts bucket`);
+        return;
+      }
+
+      // Grant access
+      logger.info('Granting Cloud Deploy SA storage.objectAdmin on artifacts bucket...');
+      execSync(
+        `gsutil iam ch serviceAccount:${cloudDeployServiceAgent}:roles/storage.objectAdmin gs://${bucketName}/`,
+        { encoding: 'utf8', stdio: 'inherit' }
+      );
+
+      logger.success(`✓ Granted Cloud Deploy SA access to gs://${bucketName}/`);
+    } catch (error) {
+      logger.warn(`⚠ Could not configure bucket access: ${error.message}`);
+      logger.info('  You can grant access manually later with:');
+      logger.info(`  gsutil iam ch serviceAccount:${cloudDeployServiceAgent}:roles/storage.objectAdmin gs://${bucketName}/`);
+    }
+  }
+
   // Compute principal emails
   const projectId = config.projectId;
   const projectNumber = await getProjectNumber(projectId);
@@ -452,6 +493,7 @@ async function setupIAMPermissions(cli, config) {
     { role: 'roles/clouddeploy.releaser', members: [`serviceAccount:${cloudBuildSa}`] },
     { role: 'roles/clouddeploy.viewer', members: [`serviceAccount:${cloudBuildSa}`] },
     { role: 'roles/artifactregistry.writer', members: [`serviceAccount:${cloudBuildSa}`] },
+    { role: 'roles/storage.objectViewer', members: [`serviceAccount:${cloudBuildSa}`] },
     // Runtime SA least privilege
     { role: 'roles/artifactregistry.reader', members: [`serviceAccount:${computeSa}`] },
     { role: 'roles/secretmanager.secretAccessor', members: [`serviceAccount:${computeSa}`] },
@@ -466,6 +508,10 @@ async function setupIAMPermissions(cli, config) {
   const saChanged = await ensureServiceAccountBinding(computeSa, cloudDeployServiceAgent, 'roles/iam.serviceAccountUser');
   if (saChanged) { logger.success('✓ Granted Cloud Deploy SA ActAs on runtime service account'); }
   else { logger.success('✓ Cloud Deploy SA ActAs on runtime service account already satisfied'); }
+
+  // Ensure Cloud Deploy SA has access to artifacts bucket
+  await ensureCloudDeployBucketAccess(config, cloudDeployServiceAgent);
+
   // Optional pruning of runtime SA elevated roles
   if (process.env.PRUNE_RUNTIME_ROLES === '1') {
     const pruneRoles = new Set([

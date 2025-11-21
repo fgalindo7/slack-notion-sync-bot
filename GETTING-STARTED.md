@@ -78,6 +78,10 @@ gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
   --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
   --role="roles/artifactregistry.writer"
 
+gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
+  --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
+  --role="roles/storage.objectViewer"
+
 # Cloud Run compute service account (runtime only)
 gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
   --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \

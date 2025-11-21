@@ -125,10 +125,10 @@ This creates the staging → production deployment pipeline.
 
 ## Step 8: Test Automated Deployment
 
-The automated deployment uses SDK-based Cloud Build automation (`cloud-build-automation.mjs`) that:
-- Builds Docker image with unique tags
-- Creates releases as `rel-<SHA>-<timestamp>`
-- Deploys to Cloud Run via Cloud Deploy
+The automated deployment uses native Cloud Build with gcloud commands ([cloudbuild.yaml](cloudbuild.yaml)) that:
+- Builds Docker image with commit SHA and latest tags
+- Creates Cloud Deploy releases as `rel-<SHA>-<timestamp>`
+- Automatically deploys to staging via Cloud Deploy
 
 ```shell
 # Make a test change and push

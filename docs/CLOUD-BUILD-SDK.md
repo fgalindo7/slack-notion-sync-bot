@@ -8,7 +8,7 @@ Complete guide for deploying On-Call Cat to Google Cloud Run with SDK-based Clou
 2. [Infrastructure Components](#infrastructure-components)
 3. [Prerequisites](#prerequisites)
 4. [Initial Setup](#initial-setup)
-5. [Cloud Build SDK Architecture](#cloud-build-sdk-architecture)
+5. [Build & Deploy Architecture](#build--deploy-architecture)
 6. [Deployment](#deployment)
 7. [Verification](#verification)
 8. [Configuration Updates](#configuration-updates)
@@ -23,35 +23,47 @@ Complete guide for deploying On-Call Cat to Google Cloud Run with SDK-based Clou
 
 ## Overview
 
-This project uses **SDK-based Cloud Build automation** instead of complex YAML configurations.
+This project uses a **hybrid approach** combining native Cloud Build with SDK-based local tooling:
 
-- Logic in JavaScript, not YAML + bash
+- **Automated builds** (GitHub push) → Native Cloud Build with gcloud commands
+- **Local/manual operations** → SDK-based automation scripts
 - **GitHub integration** - Automatic builds on push to main
 
 ### How It Works
 
+**Automated Deployment (GitHub Push):**
+
+```text
+GitHub Push → Cloud Build Trigger → cloudbuild.yaml (4 native steps)
+    ├─ Step 1: Create placeholder file (bash)
+    ├─ Step 2: Build Docker image (docker)
+    ├─ Step 3: Push to Artifact Registry (docker)
+    └─ Step 4: Create Cloud Deploy release (gcloud)
+        └─ Release: rel-<SHA>-<timestamp>
 ```
-GitHub Push → Cloud Build Trigger
+
+**Local/Manual Deployment:**
+
+```text
+npm run deploy:cloud
     ↓
-cloudbuild.yaml (2-step wrapper)
-    ├─ Install npm dependencies
-    └─ Run infrastructure/cloud-build-automation.mjs
-        ├─ Build Docker image (Cloud Build SDK)
-        ├─ Push to Artifact Registry
-        └─ Create release: rel-<SHA>-<timestamp> (Cloud Deploy SDK)
+infrastructure/cloud-build-automation.mjs
+    ├─ Build Docker image (Cloud Build SDK)
+    ├─ Push to Artifact Registry
+    └─ Create release: rel-<SHA>-<timestamp> (gcloud CLI)
 ```
 
 ---
 
 ## Infrastructure Components
 
-### SDK Scripts
+### SDK Scripts (Local/Manual Operations)
 
-| File | Purpose |
-|------|---------|
-| [infrastructure/cloud-build-automation.mjs](../infrastructure/cloud-build-automation.mjs) | SDK-based build & deploy automation (replaces complex cloudbuild.yaml) |
-| [infrastructure/setup-infrastructure.mjs](../infrastructure/setup-infrastructure.mjs) | Enable APIs, create Artifact Registry, manage secrets, apply IAM |
-| [infrastructure/deploy-automation.mjs](../infrastructure/deploy-automation.mjs) | Initialize Cloud Deploy pipeline, create releases, promote targets |
+| File | Purpose | Used By |
+|------|---------|---------|
+| [infrastructure/cloud-build-automation.mjs](../infrastructure/cloud-build-automation.mjs) | SDK-based build & deploy automation for local use | `npm run build:cloud`, `npm run deploy:cloud` |
+| [infrastructure/setup-infrastructure.mjs](../infrastructure/setup-infrastructure.mjs) | One-time infrastructure setup: Enable APIs, create Artifact Registry, manage secrets | `npm run infra:setup` |
+| [infrastructure/deploy-automation.mjs](../infrastructure/deploy-automation.mjs) | Cloud Deploy pipeline management: initialize, list releases, check status | `npm run deploy:init`, `npm run deploy:list`, `npm run deploy:status` |
 
 ### Configuration & Validation
 
@@ -62,12 +74,12 @@ cloudbuild.yaml (2-step wrapper)
 
 ### Deployment Configuration
 
-| File | Purpose |
-|------|---------|
-| [cloudbuild.yaml](../cloudbuild.yaml) | Minimal wrapper for Cloud Build triggers (GitHub integration) |
-| [clouddeploy.yaml](../clouddeploy.yaml) | Pipeline & targets (staging, production) |
-| [skaffold.yaml](../skaffold.yaml) | Build + deploy definitions |
-| [service.yaml](../service.yaml) | Cloud Run service spec (resources, env, secrets, health) |
+| File | Purpose | Usage |
+|------|---------|-------|
+| [cloudbuild.yaml](../cloudbuild.yaml) | Automated build configuration using native Cloud Build images (docker, gcloud) | GitHub triggers only |
+| [clouddeploy.yaml](../clouddeploy.yaml) | Pipeline definition: staging → production targets | Applied by `npm run deploy:init` |
+| [skaffold.yaml](../skaffold.yaml) | Cloud Run deployment manifest reference | Used by Cloud Deploy |
+| [service.yaml](../service.yaml) | Cloud Run service spec (resources, env, secrets, health checks) | Deployed by Cloud Deploy |
 
 ---
 
@@ -203,38 +215,54 @@ gcloud secrets list
 
 ---
 
-## Cloud Build SDK Architecture
+## Build & Deploy Architecture
 
-### Files
+### Automated Builds (GitHub Push)
 
-- **[cloudbuild.yaml](../cloudbuild.yaml)** - Minimal wrapper for Cloud Build triggers
-- **[infrastructure/cloud-build-automation.mjs](../infrastructure/cloud-build-automation.mjs)** - SDK automation logic
-- **[package.json](../package.json)** - Npm scripts for local/manual builds
+**Files:**
+
+- **[cloudbuild.yaml](../cloudbuild.yaml)** - Native Cloud Build configuration with 4 steps
+  - Uses official Cloud Build images: `gcr.io/cloud-builders/docker`, `gcr.io/google.com/cloudsdktool/cloud-sdk`
+  - No npm dependencies or SDK scripts required
+  - Triggered automatically on push to main branch
+
+**How it works:**
+
+1. Creates placeholder `channel-mappings.json`
+2. Builds Docker image with `${SHORT_SHA}` and `latest` tags
+3. Pushes to Artifact Registry
+4. Creates Cloud Deploy release using `gcloud deploy releases create`
+
+### Local/Manual Builds
+
+**Files:**
+
+- **[infrastructure/cloud-build-automation.mjs](../infrastructure/cloud-build-automation.mjs)** - SDK automation for local use
+- **[package.json](../package.json)** - NPM scripts: `npm run build:cloud`, `npm run deploy:cloud`
+
+**Features:**
+
+- Works from local development machine
+- Uses Cloud Build SDK to create remote builds
+- Uses CliContext for project/region configuration
+- Useful for testing builds before pushing to GitHub
 
 ### Release Naming
 
-Releases are named: `rel-<SHORT_SHA>-<TIMESTAMP>`
+Both automated and manual builds use the same naming convention:
 
-Examples:
+`rel-<SHORT_SHA>-<TIMESTAMP>`
+
+**Examples:**
 
 - `rel-a1b2c3d-1732137600`
 - `rel-9f8e7d6-1732141200`
 
-This ensures:
+**Benefits:**
 
-- **Uniqueness** (no ALREADY_EXISTS errors)
-- **Traceability** (SHA shows commit)
-- **Resource ID compliance** (under 63 chars for rollout names like `rel-...-to-staging-0001`)
-
-### SDK Script Features
-
-The `cloud-build-automation.mjs` script:
-
-- Works in both Cloud Build and local environments
-- Uses environment variables in CI (`GOOGLE_CLOUD_PROJECT`, `PROJECT_ID`)
-- Uses CliContext for local development
-- Generates unique release names automatically
-- Provides detailed logging throughout the build process
+- **Uniqueness** - Timestamp prevents ALREADY_EXISTS errors
+- **Traceability** - SHA links release to commit
+- **Compliance** - Fits GCP's 63-char limit for rollout names (`rel-...-to-staging-0001`)
 
 ---
 

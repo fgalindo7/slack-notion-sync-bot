@@ -1,11 +1,10 @@
 #!/usr/bin/env node
 /**
  * @fileoverview Cloud Build Automation - Build and deploy using Google Cloud SDKs
- * Replaces cloudbuild.yaml with programmatic SDK-based builds
+ * Combines SDK-based builds with gcloud CLI for Cloud Deploy releases
  */
 
 import { CloudBuildClient } from '@google-cloud/cloudbuild';
-import { CloudDeployClient } from '@google-cloud/deploy';
 import { CliContext } from '../lib/cli.js';
 import { logger } from '../lib/cli-logger.js';
 import { parseFlags } from '../lib/cli-flags.js';
@@ -92,43 +91,40 @@ docker build \\
 }
 
 /**
- * Create Cloud Deploy release with unique name
+ * Create Cloud Deploy release with unique name using gcloud CLI
+ * Uses gcloud command instead of SDK because it better handles pre-built images
  */
 async function createRelease(cli, config, imageTag, shortSha) {
   logger.section('Creating Cloud Deploy Release');
 
   try {
-    const client = new CloudDeployClient();
-
     // Generate unique release name: rel-<SHORT_SHA>-<timestamp>
     // This ensures the resulting rollout name (rel-...-to-staging-0001) fits under 63 chars
     const timestamp = Math.floor(Date.now() / 1000);
     const releaseName = `rel-${shortSha}-${timestamp}`;
 
     logger.info(`Release: ${releaseName}`);
-    logger.info('Creating release...');
+    logger.info(`Image: ${imageTag}`);
+    logger.info('Creating release with gcloud...');
 
-    const parent = `projects/${config.projectId}/locations/${config.region}/deliveryPipelines/${config.pipelineName}`;
+    // Use gcloud command to create release with pre-built image
+    // --images flag maps the image name in skaffold.yaml to the actual tagged image
+    const command = `gcloud deploy releases create ${releaseName} \
+      --delivery-pipeline=${config.pipelineName} \
+      --region=${config.region} \
+      --project=${config.projectId} \
+      --skaffold-file=skaffold.yaml \
+      --images=oncall-cat=${imageTag}`;
 
-    const [operation] = await client.createRelease({
-      parent,
-      releaseId: releaseName,
-      release: {
-        skaffoldConfigPath: 'skaffold.yaml',
-        buildArtifacts: [
-          {
-            image: 'oncall-cat',
-            tag: imageTag
-          }
-        ]
-      }
-    });
+    logger.info('Executing gcloud command...');
+    const result = await cli.run(command, { capture: false });
 
-    logger.info('Release submitted, waiting for completion...');
-    const [response] = await operation.promise();
+    if (result.exitCode !== 0) {
+      throw new Error(`gcloud command failed with exit code ${result.exitCode}`);
+    }
 
     logger.success(`✓ Release ${releaseName} created successfully`);
-    logger.info(`Release path: ${response.name}`);
+    logger.info(`\nView in Console: https://console.cloud.google.com/deploy/delivery-pipelines/${config.region}/${config.pipelineName}?project=${config.projectId}`);
 
     return releaseName;
 

@@ -2,7 +2,7 @@
 
 This checklist will guide you through your first deployment of On-Call Cat to Google Cloud Platform.
 
-> **Need detailed explanations?** See [infrastructure/README.md](infrastructure/README.md) for comprehensive documentation.
+> **Need detailed explanations?** See [docs/CLOUD-BUILD-SDK.md](docs/CLOUD-BUILD-SDK.md) for comprehensive documentation.
 
 ## Prerequisites
 
@@ -57,7 +57,7 @@ Copy and run the IAM commands displayed by the setup script. They grant Cloud Bu
 # Get your project number
 PROJECT_NUMBER=$(gcloud projects describe $GCP_PROJECT_ID --format='value(projectNumber)')
 
-# Cloud Build service account permissions
+# Cloud Build service account (deploy actions)
 gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
   --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
   --role="roles/run.admin"
@@ -66,28 +66,40 @@ gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
   --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
   --role="roles/iam.serviceAccountUser"
 
-# Cloud Run compute service account permissions
+gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
+  --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
+  --role="roles/clouddeploy.releaser"
+
+gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
+  --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
+  --role="roles/clouddeploy.viewer"
+
+gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
+  --member="serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com" \
+  --role="roles/artifactregistry.writer"
+
+# Cloud Run compute service account (runtime only)
 gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
   --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
   --role="roles/secretmanager.secretAccessor"
 
 gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
   --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-  --role="roles/aiplatform.user"
+  --role="roles/artifactregistry.reader"
 
-# Cloud Deploy permissions (REQUIRED for automated deployments)
-gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
-  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-  --role="roles/clouddeploy.releaser"
+# Optional: Only if using ML/AI features
+# gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
+#   --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+#   --role="roles/aiplatform.user"
 
-# ActAs permission (allows compute SA to impersonate itself for Cloud Deploy)
+# Cloud Deploy service agent ActAs permission
 gcloud iam service-accounts add-iam-policy-binding \
   ${PROJECT_NUMBER}-compute@developer.gserviceaccount.com \
-  --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+  --member="serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-clouddeploy.iam.gserviceaccount.com" \
   --role="roles/iam.serviceAccountUser"
 ```
 
-> **See detailed explanations in:** [infrastructure/README.md - Step 4](infrastructure/README.md#step-4-grant-iam-permissions)
+> **See detailed explanations in:** [docs/CLOUD-BUILD-SDK.md - IAM & Security](docs/CLOUD-BUILD-SDK.md#iam--security)
 
 ## Step 6: Connect GitHub Repository
 
@@ -112,6 +124,11 @@ npm run deploy:init
 This creates the staging → production deployment pipeline.
 
 ## Step 8: Test Automated Deployment
+
+The automated deployment uses SDK-based Cloud Build automation (`cloud-build-automation.mjs`) that:
+- Builds Docker image with unique tags
+- Creates releases as `rel-<SHA>-<timestamp>`
+- Deploys to Cloud Run via Cloud Deploy
 
 ```shell
 # Make a test change and push
@@ -161,7 +178,8 @@ Promote to production via the [Cloud Deploy Console](https://console.cloud.googl
 
 ### Next Steps
 
-- **Operations Guide:** [infrastructure/README.md](infrastructure/README.md)
+- **Operations Guide:** [docs/CLOUD-BUILD-SDK.md](docs/CLOUD-BUILD-SDK.md)
+- **NPM Scripts Reference:** [docs/CLOUD-BUILD-SDK.md#npm-scripts-reference](docs/CLOUD-BUILD-SDK.md#npm-scripts-reference)
 - **Monitoring:** Use `npm run health` and `npm run logs` (set `TARGET=local` for local container)
 
 ## Common Issues
@@ -176,13 +194,13 @@ Promote to production via the [Cloud Deploy Console](https://console.cloud.googl
 | GitHub trigger creation fails | Must use Console (Step 6) - requires OAuth |
 | Bot not responding | Check logs, verify secrets, confirm bot invited to channel |
 
-**For detailed troubleshooting:** See [infrastructure/README.md - Troubleshooting](infrastructure/README.md#troubleshooting)
+**For detailed troubleshooting:** See [docs/CLOUD-BUILD-SDK.md - Troubleshooting](docs/CLOUD-BUILD-SDK.md#troubleshooting)
 
 ## Need Help?
 
-- **Detailed docs:** [infrastructure/README.md](infrastructure/README.md)
+- **Detailed docs:** [docs/CLOUD-BUILD-SDK.md](docs/CLOUD-BUILD-SDK.md)
 - **Issues:** [GitHub Issues](https://github.com/fgalindo7/slack-notion-sync-bot/issues)
 
 ---
 
-**Last Updated:** November 13, 2025
+**Last Updated:** November 20, 2025

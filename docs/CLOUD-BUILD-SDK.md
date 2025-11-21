@@ -23,13 +23,10 @@ Complete guide for deploying On-Call Cat to Google Cloud Run with SDK-based Clou
 
 ## Overview
 
-This project uses **SDK-based Cloud Build automation** instead of complex YAML configurations. Benefits include:
+This project uses **SDK-based Cloud Build automation** instead of complex YAML configurations.
 
-✅ **No substitution errors** - All values computed at runtime in JavaScript
-✅ **Unique release names** - Format: `rel-<SHA>-<timestamp>`
-✅ **Under 63 chars** - Fits Cloud Run rollout resource ID limits
-✅ **Maintainable** - Logic in JavaScript, not YAML + bash
-✅ **GitHub integration** - Automatic builds on push to main
+- Logic in JavaScript, not YAML + bash
+- **GitHub integration** - Automatic builds on push to main
 
 ### How It Works
 
@@ -746,88 +743,6 @@ Check build logs:
 ```bash
 gcloud builds list --limit=5
 gcloud builds log <BUILD_ID>
-```
-
-### Recent Infrastructure Improvements
-
-The following issues have been fixed in recent updates:
-
-#### ✅ API Enabling Reliability
-
-**Issue:** `setup-infrastructure.mjs` used the deprecated Service Management API, causing intermittent failures.
-
-**Fix:** Migrated to the Service Usage API for reliable API enablement:
-
-```javascript
-// Before: servicemanagement.services.list() - unreliable
-// After: serviceusage.services.get() - reliable
-const serviceusage = google.serviceusage('v1');
-const serviceName = `projects/${projectId}/services/${api}`;
-const { data: service } = await serviceusage.services.get({ name: serviceName });
-const isEnabled = service.state === 'ENABLED';
-```
-
-#### ✅ Cross-Platform File Operations
-
-**Issue:** `deploy-automation.mjs` used macOS-specific `sed` commands, failing on Linux/Windows and leaving `.bak` files.
-
-**Fix:** Replaced with Node.js fs/promises for cross-platform compatibility:
-
-```javascript
-// Before: sed -i.bak 's/OLD/NEW/' file.yaml
-// After: Node.js replaceAll()
-async function replaceInFile(filePath, replacements) {
-  let content = await readFile(filePath, 'utf8');
-  for (const [find, replace] of Object.entries(replacements)) {
-    content = content.replaceAll(find, replace);
-  }
-  await writeFile(filePath, content, 'utf8');
-}
-```
-
-#### ✅ Secret Validation
-
-**Issue:** Invalid secrets were stored without validation, causing runtime errors.
-
-**Fix:** Added comprehensive validation in `lib/validators.mjs`:
-
-- Slack bot tokens must start with `xoxb-`
-- Slack app tokens must start with `xapp-`
-- Notion tokens must start with `secret_` or `ntn_`
-- Error messages sanitized to prevent secret leakage
-
-#### ✅ Configuration Centralization
-
-**Issue:** Configuration values scattered across multiple files.
-
-**Fix:** Created `config/defaults.mjs` with centralized configuration:
-
-```javascript
-export const DEFAULTS = {
-  serviceName: 'oncall-cat',
-  repoName: 'oncall-cat',
-  pipelineName: 'oncall-cat-pipeline',
-  machineType: 'E2_HIGHCPU_8',
-  buildTimeoutSeconds: 600,
-  region: 'us-central1',
-  validRegions: [/* 18 supported regions */]
-};
-```
-
-#### ✅ Error Handling in Cloud Build
-
-**Issue:** `cloud-build-automation.mjs` used `execSync` without error handling.
-
-**Fix:** Added proper error handling with stdout/stderr capture:
-
-```javascript
-try {
-  const result = execSync(cmd, { encoding: 'utf8', stdio: opts.capture ? 'pipe' : 'inherit' });
-  return { stdout: result || '', exitCode: 0 };
-} catch (error) {
-  logger.warn(`Command failed: ${cmd}`);
-  return { stdout: error.stdout || '', stderr: error.stderr || '', exitCode: error.status || 1 };
-}
 ```
 
 ### Deployment Errors

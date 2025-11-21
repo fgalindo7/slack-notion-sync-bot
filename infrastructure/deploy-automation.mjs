@@ -4,43 +4,67 @@
  */
 
 import { CloudDeployClient } from '@google-cloud/deploy';
+import { readFile, writeFile } from 'fs/promises';
 import { CliContext } from '../lib/cli.js';
 import { logger } from '../lib/cli-logger.js';
 import { parseFlags } from '../lib/cli-flags.js';
+
+/**
+ * Replace placeholders in a file
+ * @param {string} filePath - Path to the file
+ * @param {Object} replacements - Key-value pairs for replacements
+ */
+async function replaceInFile(filePath, replacements) {
+  try {
+    let content = await readFile(filePath, 'utf8');
+    for (const [find, replace] of Object.entries(replacements)) {
+      content = content.replaceAll(find, replace);
+    }
+    await writeFile(filePath, content, 'utf8');
+    logger.success(`✓ Updated ${filePath}`);
+  } catch (error) {
+    logger.error(`✗ Error updating ${filePath}: ${error.message}`);
+    throw error;
+  }
+}
 
 /**
  * Initialize Cloud Deploy pipeline
  */
 async function initializePipeline(cli, config) {
   logger.section('Initializing Cloud Deploy Pipeline');
-  
+
   try {
     logger.info('Replacing project placeholders in configuration files...');
-    
+
     // Get project number
     const { stdout: projectNumber } = await cli.run(`gcloud projects describe ${config.projectId} --format='value(projectNumber)'`, { capture: true });
     const trimmedProjectNumber = (projectNumber || '').trim();
-    
+
     logger.info(`Project Number: ${trimmedProjectNumber}`);
-    
-    // Replace placeholders in clouddeploy.yaml
-    await cli.run(`sed -i.bak 's/_PROJECT_ID_/${config.projectId}/g' clouddeploy.yaml && rm clouddeploy.yaml.bak`);
-    
-    // Replace placeholders in skaffold.yaml
-    await cli.run(`sed -i.bak 's/_PROJECT_ID_/${config.projectId}/g' skaffold.yaml && rm skaffold.yaml.bak`);
-    
-    // Replace placeholders in service.yaml
-    await cli.run(`sed -i.bak 's/_PROJECT_ID_/${config.projectId}/g' service.yaml && rm service.yaml.bak`);
-    await cli.run(`sed -i.bak 's/_PROJECT_NUMBER_/${trimmedProjectNumber}/g' service.yaml && rm service.yaml.bak`);
-    
-    logger.success('✓ Configuration files updated');
-    
+
+    // Replace placeholders using Node.js fs
+    await replaceInFile('clouddeploy.yaml', {
+      '_PROJECT_ID_': config.projectId
+    });
+
+    await replaceInFile('skaffold.yaml', {
+      '_PROJECT_ID_': config.projectId
+    });
+
+    await replaceInFile('service.yaml', {
+      '_PROJECT_ID_': config.projectId,
+      '_PROJECT_NUMBER_': trimmedProjectNumber
+    });
+
+    logger.success('✓ All configuration files updated');
+
     // Apply Cloud Deploy pipeline
     logger.info('Applying Cloud Deploy pipeline...');
     await cli.run(`gcloud deploy apply --file=clouddeploy.yaml --region=${config.region} --project=${config.projectId}`);
-    
+
     logger.success('✓ Pipeline initialized successfully');
-    
+
   } catch (error) {
     logger.error(`✗ Error initializing pipeline: ${error.message}`);
     throw error;

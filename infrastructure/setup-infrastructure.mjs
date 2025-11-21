@@ -8,10 +8,16 @@
 import { SecretManagerServiceClient } from '@google-cloud/secret-manager';
 import { ArtifactRegistryClient } from '@google-cloud/artifact-registry';
 import { CloudBuildClient } from '@google-cloud/cloudbuild';
-import { ServiceManagerClient } from '@google-cloud/service-management';
 import { google } from 'googleapis';
 import { CliContext } from '../lib/cli.js';
 import { logger } from '../lib/cli-logger.js';
+import {
+  validateSlackBotToken,
+  validateSlackAppToken,
+  validateNotionToken,
+  validateChannelMappings,
+  sanitizeError
+} from '../lib/validators.mjs';
 import _fs from 'fs/promises';
 
 // Static configuration (project/region filled at runtime)
@@ -38,31 +44,43 @@ const STATIC = {
 };
 
 /**
- * Enable required GCP APIs
+ * Enable required GCP APIs using Service Usage API
  */
 async function enableAPIs(cli, config) {
   logger.section('Enabling Required GCP APIs');
-  
-  const serviceManagement = new ServiceManagerClient();
-  
+
+  const serviceusage = google.serviceusage('v1');
+  const auth = await google.auth.getClient({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] });
+  google.options({ auth });
+
   for (const api of STATIC.requiredApis) {
     try {
-      logger.info(`Enabling ${api}...`);
-      
+      logger.info(`Checking ${api}...`);
+
+      const serviceName = `projects/${config.projectId}/services/${api}`;
+
       // Check if already enabled
-      const [services] = await serviceManagement.listServices({
-        consumerId: `project:${config.projectId}`,
-      });
-      
-      const isEnabled = services.some(s => s.serviceName === api);
-      
+      let isEnabled = false;
+      try {
+        const { data: service } = await serviceusage.services.get({ name: serviceName });
+        isEnabled = service.state === 'ENABLED';
+      } catch (error) {
+        if (error.code !== 404 && error.code !== 403) {
+          throw error;
+        }
+        // Service not found or permission denied, try to enable
+      }
+
       if (isEnabled) {
         logger.success(`✓ ${api} already enabled`);
       } else {
         // Enable the service
-        await serviceManagement.enableService({
-          serviceName: api,
-        });
+        logger.info(`Enabling ${api}...`);
+        await serviceusage.services.enable({ name: serviceName });
+
+        // Wait a bit for the service to be fully enabled
+        await new Promise(resolve => setTimeout(resolve, 2000));
+
         logger.success(`✓ ${api} enabled successfully`);
       }
     } catch (error) {
@@ -155,11 +173,38 @@ async function setupSecrets(cli, config) {
 }
 
 /**
+ * Validate secret value based on secret name
+ * @param {string} secretName - Name of the secret
+ * @param {string} value - Secret value to validate
+ * @throws {Error} If validation fails
+ */
+function validateSecretValue(secretName, value) {
+  switch (secretName) {
+    case 'slack-bot-token':
+      validateSlackBotToken(value);
+      break;
+    case 'slack-app-token':
+      validateSlackAppToken(value);
+      break;
+    case 'notion-token':
+      validateNotionToken(value);
+      break;
+    case 'channel-mappings':
+      validateChannelMappings(value);
+      break;
+    default:
+      // No specific validation for unknown secrets
+      break;
+  }
+}
+
+/**
  * Create or update a single secret
  */
 async function createOrUpdateSecret(cli, client, parent, secretConfig, required) {
   const secretName = `${parent}/secrets/${secretConfig.name}`;
-  
+  let value; // Declare at function scope for error handling
+
   try {
     // Check if secret exists
     let secretExists = false;
@@ -167,14 +212,14 @@ async function createOrUpdateSecret(cli, client, parent, secretConfig, required)
       await client.getSecret({ name: secretName });
       secretExists = true;
       logger.success(`✓ Secret "${secretConfig.name}" already exists`);
-      
+
       const interactive = process.stdin.isTTY && !cli.dryRun;
       // In non-interactive mode, skip existing secrets
       if (!interactive) {
         logger.warn(`  Skipping (non-interactive mode)`);
         return;
       }
-      
+
       // In interactive mode, ask if user wants to update
       try {
         const update = await cli.prompt(`  Update value? (y/N): `, { defaultValue: 'n' });
@@ -202,17 +247,16 @@ async function createOrUpdateSecret(cli, client, parent, secretConfig, required)
         throw error;
       }
     }
-    
+
     const interactive = process.stdin.isTTY && !cli.dryRun;
     // Skip value prompt in non-interactive mode if secret exists
     if (secretExists && !interactive) {
       return;
     }
-    
+
     // Get secret value from user
     logger.info(`\n${secretConfig.description}`);
-    
-    let value;
+
     try {
       value = await cli.prompt(`Enter value for ${secretConfig.name}: `);
     } catch {
@@ -223,13 +267,22 @@ async function createOrUpdateSecret(cli, client, parent, secretConfig, required)
       }
       return;
     }
-    
+
     if (!value && required && !secretExists) {
       logger.error(`✗ Value required for ${secretConfig.name}`);
       return;
     }
-    
+
     if (value) {
+      // Validate secret value
+      try {
+        validateSecretValue(secretConfig.name, value);
+      } catch (validationError) {
+        logger.error(`✗ Validation failed: ${validationError.message}`);
+        logger.warn(`  Please check the value and try again`);
+        return;
+      }
+
       // Add secret version
       await client.addSecretVersion({
         parent: secretName,
@@ -240,7 +293,9 @@ async function createOrUpdateSecret(cli, client, parent, secretConfig, required)
       logger.success(`✓ Secret value set successfully`);
     }
   } catch (error) {
-    logger.error(`✗ Error setting up secret "${secretConfig.name}": ${error.message}`);
+    // Sanitize error message (don't include value if not set)
+    const sanitizedMessage = sanitizeError(error, value ? [value] : []);
+    logger.error(`✗ Error setting up secret "${secretConfig.name}": ${sanitizedMessage}`);
     // Don't throw fatal error - continue with remaining secrets
     if (required) {
       logger.warn(`  ⚠ Warning: Required secret failed, but continuing...`);

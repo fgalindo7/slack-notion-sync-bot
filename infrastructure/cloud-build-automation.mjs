@@ -32,6 +32,12 @@ async function buildImage(cli, config, shortSha) {
 
     // Define the build configuration
     const build = {
+      source: {
+        storageSource: {
+          bucket: `${config.projectId}_cloudbuild`,
+          object: `source/manual-${shortSha}.tgz`
+        }
+      },
       steps: [
         // Step 1: Ensure placeholder channel-mappings.json exists
         {
@@ -77,7 +83,8 @@ docker build \\
     // Wait for build to complete
     const [response] = await operation.promise();
 
-    if (response.status === 'SUCCESS') {
+    // Status is a numeric enum: 0=UNKNOWN, 1=QUEUED, 2=WORKING, 3=SUCCESS, 4=FAILURE, etc.
+    if (response.status === 'SUCCESS' || response.status === 3) {
       logger.success('✓ Build completed successfully');
       return { imageTag, shortSha };
     } else {

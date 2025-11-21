@@ -249,6 +249,25 @@ async function main() {
         await buildImage(cli, config, shortSha);
         break;
       }
+      case 'create-release': {
+        // When called from cloudbuild.yaml, image is already built and pushed
+        // Get SHORT_SHA from environment or git
+        const shortSha = process.env.SHORT_SHA || await getCommitSha(cli);
+        logger.info(`Commit SHA: ${shortSha}`);
+
+        // Image tag from environment or construct it
+        const imageTag = process.env.IMAGE_TAG || `${config.region}-docker.pkg.dev/${config.projectId}/${config.repoName}/app:${shortSha}`;
+        logger.info(`Image: ${imageTag}`);
+
+        // Create Cloud Deploy release
+        await createRelease(cli, config, imageTag, shortSha);
+
+        logger.success('\n✓ Release created successfully');
+        logger.info('\nNext steps:');
+        logger.info('1. Monitor the rollout in Cloud Console');
+        logger.info('2. Promote to production when ready');
+        break;
+      }
       case 'build-and-deploy':
       case 'deploy': {
         const shortSha = await getCommitSha(cli);
@@ -268,7 +287,7 @@ async function main() {
       }
       default:
         logger.error(`Unknown command: ${command}`);
-        logger.warn('Available commands: build, build-and-deploy, deploy');
+        logger.warn('Available commands: build, create-release, build-and-deploy, deploy');
         process.exit(1);
     }
 

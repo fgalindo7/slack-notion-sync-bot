@@ -36,16 +36,18 @@ steps:
 
   # Step 3: Create Cloud Deploy release
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
-    entrypoint: 'gcloud'
+    entrypoint: 'bash'
     args:
-      - 'deploy'
-      - 'releases'
-      - 'create'
-      - 'release-${SHORT_SHA}-${BUILD_ID}'
-      - '--delivery-pipeline=${_PIPELINE_NAME}'
-      - '--region=${_REGION}'
-      - '--images=oncall-cat=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/app:${SHORT_SHA}'
-      - '--skaffold-file=skaffold.yaml'
+      - '-c'
+      - |
+        # Keep rollout resource IDs under 63 chars when Cloud Deploy appends "-to-<target>-####"
+        RELEASE_SUFFIX="$(echo "${BUILD_ID}" | cut -c1-8)"
+        RELEASE_NAME="rel-${SHORT_SHA}-${RELEASE_SUFFIX}"
+        gcloud deploy releases create "${RELEASE_NAME}" \
+          --delivery-pipeline="${_PIPELINE_NAME}" \
+          --region="${_REGION}" \
+          --images="oncall-cat=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_REPO_NAME}/app:${SHORT_SHA}" \
+          --skaffold-file=skaffold.yaml
     id: 'create-release'
     waitFor: ['push-images']
 

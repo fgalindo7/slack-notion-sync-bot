@@ -430,8 +430,8 @@ async function setupIAMPermissions(cli, config) {
     return false;
   }
 
-  // Helper: ensure Cloud Deploy and Cloud Build SAs have access to artifacts bucket
-  async function ensureArtifactsBucketAccess(config, cloudBuildSa, cloudDeployServiceAgent) {
+  // Helper: ensure Cloud Deploy, Cloud Build, and Compute SAs have access to artifacts bucket
+  async function ensureArtifactsBucketAccess(config, cloudBuildSa, computeSa, cloudDeployServiceAgent) {
     const bucketName = `${config.region}.deploy-artifacts.${config.projectId}.appspot.com`;
 
     logger.info(`Checking artifacts bucket access for gs://${bucketName}/...`);
@@ -447,6 +447,7 @@ async function setupIAMPermissions(cli, config) {
         logger.info('  Run these commands after the first deployment:');
         logger.info(`  gsutil iam ch serviceAccount:${cloudDeployServiceAgent}:roles/storage.objectAdmin gs://${bucketName}/`);
         logger.info(`  gsutil iam ch serviceAccount:${cloudBuildSa}:roles/storage.objectAdmin gs://${bucketName}/`);
+        logger.info(`  gsutil iam ch serviceAccount:${computeSa}:roles/storage.objectAdmin gs://${bucketName}/`);
         return;
       }
 
@@ -476,11 +477,24 @@ async function setupIAMPermissions(cli, config) {
       } else {
         logger.success(`✓ Cloud Build SA already has access to artifacts bucket`);
       }
+
+      // Grant access to Compute SA if needed (used by Cloud Deploy rendering builds)
+      if (!currentPolicy.includes(computeSa)) {
+        logger.info('Granting Compute SA storage.objectAdmin on artifacts bucket...');
+        execSync(
+          `gsutil iam ch serviceAccount:${computeSa}:roles/storage.objectAdmin gs://${bucketName}/`,
+          { encoding: 'utf8', stdio: 'inherit' }
+        );
+        logger.success(`✓ Granted Compute SA access to gs://${bucketName}/`);
+      } else {
+        logger.success(`✓ Compute SA already has access to artifacts bucket`);
+      }
     } catch (error) {
       logger.warn(`⚠ Could not configure bucket access: ${error.message}`);
       logger.info('  You can grant access manually later with:');
       logger.info(`  gsutil iam ch serviceAccount:${cloudDeployServiceAgent}:roles/storage.objectAdmin gs://${bucketName}/`);
       logger.info(`  gsutil iam ch serviceAccount:${cloudBuildSa}:roles/storage.objectAdmin gs://${bucketName}/`);
+      logger.info(`  gsutil iam ch serviceAccount:${computeSa}:roles/storage.objectAdmin gs://${bucketName}/`);
     }
   }
 
@@ -522,8 +536,8 @@ async function setupIAMPermissions(cli, config) {
   if (saChanged) { logger.success('✓ Granted Cloud Deploy SA ActAs on runtime service account'); }
   else { logger.success('✓ Cloud Deploy SA ActAs on runtime service account already satisfied'); }
 
-  // Ensure Cloud Deploy and Cloud Build SAs have access to artifacts bucket
-  await ensureArtifactsBucketAccess(config, cloudBuildSa, cloudDeployServiceAgent);
+  // Ensure Cloud Deploy, Cloud Build, and Compute SAs have access to artifacts bucket
+  await ensureArtifactsBucketAccess(config, cloudBuildSa, computeSa, cloudDeployServiceAgent);
 
   // Optional pruning of runtime SA elevated roles
   if (process.env.PRUNE_RUNTIME_ROLES === '1') {

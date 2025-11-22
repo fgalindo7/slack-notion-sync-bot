@@ -127,7 +127,7 @@ npm run deploy:init
 
 This creates the staging → production deployment pipeline.
 
-**Important:** After creating the pipeline, grant Cloud Deploy and Cloud Build service accounts access to the artifacts bucket:
+**Important:** After creating the pipeline, grant service accounts access to the artifacts bucket:
 
 ```shell
 PROJECT_NUMBER=$(gcloud projects describe $GCP_PROJECT_ID --format='value(projectNumber)')
@@ -140,9 +140,16 @@ gsutil iam ch serviceAccount:service-${PROJECT_NUMBER}@gcp-sa-clouddeploy.iam.gs
 # Grant Cloud Build SA access (uploads Skaffold configs during release creation)
 gsutil iam ch serviceAccount:${PROJECT_NUMBER}@cloudbuild.gserviceaccount.com:roles/storage.objectAdmin \
   gs://${BUCKET_NAME}/
+
+# Grant Compute SA access (Cloud Deploy rendering builds write rendered artifacts)
+gsutil iam ch serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com:roles/storage.objectAdmin \
+  gs://${BUCKET_NAME}/
 ```
 
-This allows Cloud Build to upload and Cloud Deploy to retrieve Skaffold configurations.
+This ensures the full deployment pipeline works:
+- Cloud Build uploads source Skaffold configs during release creation
+- Cloud Deploy renders configs and writes output to the artifacts bucket
+- Cloud Deploy reads configs during rollout execution
 
 ## Step 8: Test Deployment Locally (Optional)
 

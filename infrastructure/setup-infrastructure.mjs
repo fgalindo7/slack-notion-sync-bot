@@ -521,7 +521,10 @@ async function setupIAMPermissions(cli, config) {
     { role: 'roles/clouddeploy.viewer', members: [`serviceAccount:${cloudBuildSa}`] },
     { role: 'roles/artifactregistry.writer', members: [`serviceAccount:${cloudBuildSa}`] },
     { role: 'roles/storage.objectViewer', members: [`serviceAccount:${cloudBuildSa}`] },
-    // Runtime SA least privilege
+    // Cloud Deploy SA required for deployment operations
+    { role: 'roles/run.developer', members: [`serviceAccount:${cloudDeployServiceAgent}`] },
+    // Runtime (Compute) SA permissions - includes deployment operations when used by Cloud Deploy
+    { role: 'roles/run.developer', members: [`serviceAccount:${computeSa}`] },
     { role: 'roles/artifactregistry.reader', members: [`serviceAccount:${computeSa}`] },
     { role: 'roles/secretmanager.secretAccessor', members: [`serviceAccount:${computeSa}`] },
     ...(process.env.INCLUDE_VERTEX_AI === '1' ? [{ role: 'roles/aiplatform.user', members: [`serviceAccount:${computeSa}`] }] : [])

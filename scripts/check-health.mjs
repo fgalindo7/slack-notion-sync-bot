@@ -774,14 +774,20 @@ async function renderDashboard(data = null, countdown = null) {
     console.log('');
     frame.forEach(line => console.log(`  ${catColor}${line}${colors.reset}`));
   }
-  
+
   // JSON output mode
   if (flags.json) {
     // Preserve existing JSON shape by returning the raw health fetch result
     console.log(JSON.stringify({ health: healthRes, cloudRun, cloudDeploy, cloudBuild, git, mappings }, null, 2));
     return;
   }
-  
+
+  // In watch mode, leave space for the animated cat at the top
+  if (flags.watch) {
+    // Skip 4 lines: empty line + 3 cat lines
+    console.log('\n\n\n');
+  }
+
   // Draw header
   console.log(drawHeader('On-Call Cat - Health Check Dashboard'));
   console.log('');
@@ -896,25 +902,6 @@ async function main() {
       }
     }
 
-    // Update countdown display by moving cursor to last line
-    function updateCountdown() {
-      if (isRefreshing) {
-        return;
-      }
-
-      // Calculate approximate line position for countdown (after all content)
-      // Move to a fixed line near bottom and update countdown
-      const countdownLine = 35; // Approximate line where countdown appears
-      process.stdout.write(`\x1b[${countdownLine};0H`); // Move to countdown line
-      process.stdout.write('\x1b[2K'); // Clear line
-      process.stdout.write(`${colors.gray}Refreshing in ${secondsUntilRefresh}s... (Ctrl+C to exit)${colors.reset}`);
-
-      secondsUntilRefresh -= 1;
-      if (secondsUntilRefresh < 0) {
-        secondsUntilRefresh = Math.floor(flags.interval / 1000);
-      }
-    }
-
     // Animation loop
     const animTimer = setInterval(() => {
       const motion = motions[mi];
@@ -927,18 +914,29 @@ async function main() {
       }
     }, Math.max(120, flags.animInterval));
 
-    // Countdown timer (updates every second)
-    const countdownTimer = setInterval(updateCountdown, 1000);
+    // Countdown timer (updates every second by re-rendering dashboard)
+    const countdownTimer = setInterval(async () => {
+      if (isRefreshing) {
+        return;
+      }
+      secondsUntilRefresh -= 1;
+      if (secondsUntilRefresh < 0) {
+        secondsUntilRefresh = Math.floor(flags.interval / 1000);
+      }
+      // Re-render just to update countdown
+      console.clear();
+      await renderDashboard(cachedData, secondsUntilRefresh);
+    }, 1000);
 
     // Periodic full refresh (rebuilds the body and resets header baseline)
     // Fetch data BEFORE clearing to eliminate flicker
     const bodyTimer = setInterval(async () => {
-      isRefreshing = true; // Pause animation
+      isRefreshing = true; // Pause animation and countdown
       cachedData = await fetchDashboardData();
       secondsUntilRefresh = Math.floor(flags.interval / 1000); // Reset countdown
       console.clear();
       await renderDashboard(cachedData, secondsUntilRefresh);
-      isRefreshing = false; // Resume animation
+      isRefreshing = false; // Resume animation and countdown
     }, Math.max(1000, flags.interval));
 
     // Ensure process keeps running with intervals; handle Ctrl+C to cleanup

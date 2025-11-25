@@ -914,36 +914,21 @@ async function main() {
       }
     }, Math.max(120, flags.animInterval));
 
-    // Countdown timer (updates every second by re-rendering dashboard)
-    const countdownTimer = setInterval(async () => {
-      if (isRefreshing) {
-        return;
-      }
-      secondsUntilRefresh -= 1;
-      if (secondsUntilRefresh < 0) {
-        secondsUntilRefresh = Math.floor(flags.interval / 1000);
-      }
-      // Re-render just to update countdown
-      console.clear();
-      await renderDashboard(cachedData, secondsUntilRefresh);
-    }, 1000);
-
     // Periodic full refresh (rebuilds the body and resets header baseline)
     // Fetch data BEFORE clearing to eliminate flicker
     const bodyTimer = setInterval(async () => {
-      isRefreshing = true; // Pause animation and countdown
+      isRefreshing = true; // Pause animation
       cachedData = await fetchDashboardData();
       secondsUntilRefresh = Math.floor(flags.interval / 1000); // Reset countdown
       console.clear();
       await renderDashboard(cachedData, secondsUntilRefresh);
-      isRefreshing = false; // Resume animation and countdown
+      isRefreshing = false; // Resume animation
     }, Math.max(1000, flags.interval));
 
     // Ensure process keeps running with intervals; handle Ctrl+C to cleanup
     process.on('SIGINT', () => {
       clearInterval(animTimer);
       clearInterval(bodyTimer);
-      clearInterval(countdownTimer);
       process.exit(130);
     });
   } else {

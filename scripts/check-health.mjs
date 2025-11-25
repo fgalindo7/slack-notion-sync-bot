@@ -751,8 +751,9 @@ async function fetchDashboardData() {
 /**
  * Main dashboard render
  * @param {Object} data - Pre-fetched data (optional, will fetch if not provided)
+ * @param {number} countdown - Seconds until next refresh (watch mode only)
  */
-async function renderDashboard(data = null) {
+async function renderDashboard(data = null, countdown = null) {
   // Fetch data if not provided (single-run mode or first watch render)
   if (!data) {
     data = await fetchDashboardData();
@@ -822,18 +823,19 @@ async function renderDashboard(data = null) {
   }
   
   // Summary
-  const allHealthy = health?.status === 'healthy' && 
-                     cloudRun && 
+  const allHealthy = health?.status === 'healthy' &&
+                     cloudRun &&
                      cloudDeploy?.renderState === 'SUCCEEDED';
-  
+
   if (allHealthy) {
     console.log(`${colors.green}${icons.ok} All systems operational${colors.reset}`);
   } else {
     console.log(`${colors.yellow}${icons.warn} Some issues detected - review above${colors.reset}`);
   }
-  
-  if (flags.watch) {
-    console.log(`\n${colors.gray}Refreshing in ${flags.interval / 1000}s... (Ctrl+C to exit)${colors.reset}`);
+
+  // Watch mode countdown
+  if (flags.watch && countdown !== null) {
+    console.log(`\n${colors.gray}Refreshing in ${countdown}s... (Ctrl+C to exit)${colors.reset}`);
   }
 
   // render complete
@@ -852,8 +854,12 @@ async function main() {
   }
   
   if (flags.watch) {
-    // Initial full render
-    await renderDashboard();
+    // Fetch initial data and render
+    let cachedData = await fetchDashboardData();
+    let secondsUntilRefresh = Math.floor(flags.interval / 1000);
+
+    console.clear();
+    await renderDashboard(cachedData, secondsUntilRefresh);
 
     // Animation state (blink-only gentle loop)
     const gentle = flags.animMode === 'gentle';
@@ -870,9 +876,15 @@ async function main() {
         ];
     let mi = 0; // motion index
     let fi = 0; // frame index within motion
+    let isRefreshing = false; // Flag to pause animation during refresh
 
     // Paint only the cat header at the top, leaving body intact
     function paintCatHeader(key) {
+      // Skip animation if we're in the middle of a refresh
+      if (isRefreshing) {
+        return;
+      }
+
       // Move cursor to top-left, print one blank line + 3 cat lines colored
       const catColor = getCatColor();
       process.stdout.write('\x1b[H');
@@ -881,6 +893,25 @@ async function main() {
       for (const line of lines) {
         // Leading two spaces to match dashboard indent
         process.stdout.write(`  ${catColor}${line}${colors.reset}\n`);
+      }
+    }
+
+    // Update countdown display by moving cursor to last line
+    function updateCountdown() {
+      if (isRefreshing) {
+        return;
+      }
+
+      // Calculate approximate line position for countdown (after all content)
+      // Move to a fixed line near bottom and update countdown
+      const countdownLine = 35; // Approximate line where countdown appears
+      process.stdout.write(`\x1b[${countdownLine};0H`); // Move to countdown line
+      process.stdout.write('\x1b[2K'); // Clear line
+      process.stdout.write(`${colors.gray}Refreshing in ${secondsUntilRefresh}s... (Ctrl+C to exit)${colors.reset}`);
+
+      secondsUntilRefresh -= 1;
+      if (secondsUntilRefresh < 0) {
+        secondsUntilRefresh = Math.floor(flags.interval / 1000);
       }
     }
 
@@ -896,18 +927,25 @@ async function main() {
       }
     }, Math.max(120, flags.animInterval));
 
+    // Countdown timer (updates every second)
+    const countdownTimer = setInterval(updateCountdown, 1000);
+
     // Periodic full refresh (rebuilds the body and resets header baseline)
     // Fetch data BEFORE clearing to eliminate flicker
     const bodyTimer = setInterval(async () => {
-      const data = await fetchDashboardData();
+      isRefreshing = true; // Pause animation
+      cachedData = await fetchDashboardData();
+      secondsUntilRefresh = Math.floor(flags.interval / 1000); // Reset countdown
       console.clear();
-      await renderDashboard(data);
+      await renderDashboard(cachedData, secondsUntilRefresh);
+      isRefreshing = false; // Resume animation
     }, Math.max(1000, flags.interval));
 
     // Ensure process keeps running with intervals; handle Ctrl+C to cleanup
     process.on('SIGINT', () => {
       clearInterval(animTimer);
       clearInterval(bodyTimer);
+      clearInterval(countdownTimer);
       process.exit(130);
     });
   } else {

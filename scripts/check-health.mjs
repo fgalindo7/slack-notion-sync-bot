@@ -751,9 +751,8 @@ async function fetchDashboardData() {
 /**
  * Main dashboard render
  * @param {Object} data - Pre-fetched data (optional, will fetch if not provided)
- * @param {number} countdown - Seconds until next refresh (watch mode only)
  */
-async function renderDashboard(data = null, countdown = null) {
+async function renderDashboard(data = null) {
   // Fetch data if not provided (single-run mode or first watch render)
   if (!data) {
     data = await fetchDashboardData();
@@ -839,9 +838,9 @@ async function renderDashboard(data = null, countdown = null) {
     console.log(`${colors.yellow}${icons.warn} Some issues detected - review above${colors.reset}`);
   }
 
-  // Watch mode countdown
-  if (flags.watch && countdown !== null) {
-    console.log(`\n${colors.gray}Refreshing in ${countdown}s... (Ctrl+C to exit)${colors.reset}`);
+  // Watch mode countdown placeholder (actual countdown updated via cursor positioning)
+  if (flags.watch) {
+    console.log(''); // Empty line for countdown to be written by cursor positioning
   }
 
   // render complete
@@ -865,7 +864,7 @@ async function main() {
     let secondsUntilRefresh = Math.floor(flags.interval / 1000);
 
     console.clear();
-    await renderDashboard(cachedData, secondsUntilRefresh);
+    await renderDashboard(cachedData);
 
     // Animation state (blink-only gentle loop)
     const gentle = flags.animMode === 'gentle';
@@ -941,7 +940,7 @@ async function main() {
       cachedData = await fetchDashboardData();
       secondsUntilRefresh = Math.floor(flags.interval / 1000); // Reset countdown
       console.clear();
-      await renderDashboard(cachedData, secondsUntilRefresh);
+      await renderDashboard(cachedData);
       isRefreshing = false; // Resume animation
     }, Math.max(1000, flags.interval));
 

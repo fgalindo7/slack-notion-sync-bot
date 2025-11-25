@@ -731,9 +731,35 @@ function renderGitInfo(git, health) {
 }
 
 /**
- * Main dashboard render
+ * Fetch all dashboard data
+ * Separated from rendering to allow pre-fetching in watch mode
  */
-async function renderDashboard() {
+async function fetchDashboardData() {
+  const [healthRes, cloudRun, cloudDeploy, cloudBuild, git] = await Promise.all([
+    fetchAppHealth(),
+    fetchCloudRunInfo(),
+    fetchCloudDeployInfo(),
+    fetchCloudBuildInfo(),
+    fetchGitInfo(),
+  ]);
+  const health = healthRes && healthRes.ok ? healthRes.json : { status: 'unhealthy', error: healthRes?.error || 'unknown' };
+  const mappings = loadChannelMappings();
+
+  return { health, healthRes, cloudRun, cloudDeploy, cloudBuild, git, mappings };
+}
+
+/**
+ * Main dashboard render
+ * @param {Object} data - Pre-fetched data (optional, will fetch if not provided)
+ */
+async function renderDashboard(data = null) {
+  // Fetch data if not provided (single-run mode or first watch render)
+  if (!data) {
+    data = await fetchDashboardData();
+  }
+
+  const { health, healthRes, cloudRun, cloudDeploy, cloudBuild, git, mappings } = data;
+
   // Clear screen only for single-run (non-watch) mode so watch scrolls naturally
   if (!flags.json && !flags.watch) {
     console.clear();
@@ -747,18 +773,6 @@ async function renderDashboard() {
     console.log('');
     frame.forEach(line => console.log(`  ${catColor}${line}${colors.reset}`));
   }
-  
-  // Fetch all data
-  const [healthRes, cloudRun, cloudDeploy, cloudBuild, git] = await Promise.all([
-    fetchAppHealth(),
-    fetchCloudRunInfo(),
-    fetchCloudDeployInfo(),
-    fetchCloudBuildInfo(),
-    fetchGitInfo(),
-  ]);
-  const health = healthRes && healthRes.ok ? healthRes.json : { status: 'unhealthy', error: healthRes?.error || 'unknown' };
-  
-  const mappings = loadChannelMappings();
   
   // JSON output mode
   if (flags.json) {
@@ -883,9 +897,11 @@ async function main() {
     }, Math.max(120, flags.animInterval));
 
     // Periodic full refresh (rebuilds the body and resets header baseline)
+    // Fetch data BEFORE clearing to eliminate flicker
     const bodyTimer = setInterval(async () => {
+      const data = await fetchDashboardData();
       console.clear();
-      await renderDashboard();
+      await renderDashboard(data);
     }, Math.max(1000, flags.interval));
 
     // Ensure process keeps running with intervals; handle Ctrl+C to cleanup

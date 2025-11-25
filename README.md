@@ -325,29 +325,44 @@ node --check app.js
 
 ## Monitoring & Health Checks
 
-### Enhanced Health Dashboard
+### Unified Health Check System
 
-Check the complete system status with our comprehensive health dashboard:
+Check system status for both local and GCP environments with our modular OO architecture:
 
 ```shell
-npm run health        # Single run, all sections
-npm run health:watch  # Auto-refresh every 30s
-npm run health:json   # JSON output for automation
+# Local environment checks (Docker, Node.js, Filesystem, Ports)
+npm run health:local
+
+# GCP environment checks (Cloud Run, Deploy, Build)
+npm run health:gcp
+
+# Watch mode with live updates
+npm run health:watch           # GCP
+npm run health:watch:local     # Local
+
+# JSON output for CI/CD and automation
+npm run health:json            # GCP
+npm run health:json:local      # Local
 ```
 
-**Dashboard includes:**
+**Dashboard sections:**
 - **[APP]** Application health with real-time metrics and channel configuration
-- **[CR]** Cloud Run service status, scaling, and resources
-- **[CD]** Cloud Deploy pipeline state and rollout progress
-- **[CB]** Recent build history with success/failure tracking
+- **[CR]** Cloud Run service status, scaling, and resources (GCP only)
+- **[CD]** Cloud Deploy pipeline state and rollout progress (GCP only)
+- **[CB]** Recent build history with success/failure tracking (GCP only)
 - **[GIT]** Version sync between local and deployed code
+- **[DOCKER]** Docker status and container health (local only)
+- **[NODE]** Node.js environment and dependencies (local only)
+- **[FS]** Filesystem checks for required files (local only)
+- **[PORT]** Port availability checks (local only)
 
 **Features:**
+- Modular OO design with extensible checkers and renderers
 - Real Slack channel names (fetched via API)
 - Real Notion database titles
 - Success rate warnings (< 95%)
 - Smart URL truncation + terminal hyperlinks
-- Professional ASCII art icons
+- Animated cat in watch mode
 
 See [docs/HEALTH_CHECKS.md](docs/HEALTH_CHECKS.md) for complete documentation.
 
@@ -370,10 +385,12 @@ node infrastructure/setup-infrastructure.mjs --region us-central1
 DRY_RUN=1 node scripts/ops.mjs preflight --target=gcp
 ```
 
-Unified commands (via `scripts/ops.mjs`):
+Unified commands (via `scripts/ops.mjs` and `scripts/check-health.mjs`):
 
 - `npm run logs -- [--target=local|gcp] [--follow] [--include-requests]`
-- `npm run health` | `npm run health:watch` | `npm run health:json`
+- `npm run health:local` | `npm run health:gcp` (explicit target selection)
+- `npm run health:watch` | `npm run health:watch:local` (live monitoring)
+- `npm run health:json` | `npm run health:json:local` (JSON output)
 - `npm run deploy` | `npm run deploy:list` | `npm run deploy:status`
 - `npm run preflight` (Slack + IAM + pipeline checks)
 
@@ -537,8 +554,13 @@ on-call-cat/
 │   ├── SETUP_FLOW.md             # Deployment wizard flow diagram
 │   └── SCRIPT_FLAGS.md           # Script flags and selective execution
 ├── scripts/                      # Utility scripts
-│   ├── ops.mjs                   # Unified CLI (health, logs, start, stop, build, deploy)
-│   └── check-health.mjs          # Health dashboard (used by ops)
+│   ├── ops.mjs                   # Unified CLI (start, stop, logs, deploy, preflight)
+│   ├── check-health.mjs          # Health check entry point (unified local/GCP)
+│   ├── check-health.test.mjs     # Health check smoke tests
+│   ├── pretty-gcp-logs.mjs       # GCP log formatter
+│   ├── pretty-gcp-logs.test.mjs  # Log formatter tests
+│   ├── lint-no-emoji.mjs         # Emoji linting tool
+│   └── cat-demo.mjs              # ASCII cat animation demo
 ├── lib/                          # Modular components
 │   ├── config.js                 # Centralized configuration & multi-channel routing
 │   ├── constants.js              # App-wide constants (defaults, regexes)
@@ -547,7 +569,26 @@ on-call-cat/
 │   ├── parser.test.js            # Unit tests for parser functions
 │   ├── validation.js             # Field validation functions
 │   ├── validation.test.js        # Unit tests for validation functions
-│   └── schema-cache.js           # NotionSchemaCache class with TTL
+│   ├── schema-cache.js           # NotionSchemaCache class with TTL
+│   ├── ascii-icons.js            # Centralized icon library
+│   ├── ascii-art.js              # ASCII cat frames and animations
+│   └── health-check/             # Health check system (OO architecture)
+│       ├── health-checker.mjs    # Base class for checkers
+│       ├── renderer.mjs          # Base class for renderers
+│       ├── config.mjs            # Health check configuration
+│       ├── formatters.mjs        # Shared formatting utilities
+│       ├── checks/               # 7 modular health checkers
+│       │   ├── git-check.mjs
+│       │   ├── app-health-check.mjs
+│       │   ├── gcp-check.mjs
+│       │   ├── docker-check.mjs
+│       │   ├── node-check.mjs
+│       │   ├── filesystem-check.mjs
+│       │   └── port-check.mjs
+│       └── renderers/            # 3 flexible renderers
+│           ├── terminal-renderer.mjs
+│           ├── json-renderer.mjs
+│           └── watch-renderer.mjs
 ├── logo/                         # Brand assets
 │   ├── on-call-cat.png           # Main logo
 │   └── on-call-cat-2.png         # Small logo variant

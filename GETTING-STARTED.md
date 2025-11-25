@@ -219,7 +219,8 @@ Promote to production via the [Cloud Deploy Console](https://console.cloud.googl
 
 - **Operations Guide:** [docs/CLOUD-BUILD-SDK.md](docs/CLOUD-BUILD-SDK.md)
 - **NPM Scripts Reference:** [docs/CLOUD-BUILD-SDK.md#npm-scripts-reference](docs/CLOUD-BUILD-SDK.md#npm-scripts-reference)
-- **Monitoring:** Use `npm run health` and `npm run logs` (set `TARGET=local` for local container)
+- **Monitoring:** Use `npm run health:gcp` for GCP or `npm run health:local` for local environment
+- **Health Checks:** See [docs/HEALTH_CHECKS.md](docs/HEALTH_CHECKS.md) for comprehensive monitoring guide
 
 ## Common Issues
 

@@ -70,7 +70,7 @@ npm run build
 # This runs: docker compose up -d --build
 
 # Check health
-npm run health
+npm run health:local
 
 # View logs
 npm run logs
@@ -137,7 +137,7 @@ This verifies:
 ```bash
 # 1. Build and test locally first
 npm run build
-npm run health
+npm run health:local
 
 # 2. If local works, test remote build
 npm run build:cloud
@@ -219,7 +219,7 @@ SERVICE_URL=$(gcloud run services describe oncall-cat --region=us-central1 --for
 curl $SERVICE_URL/health
 
 # Or use npm script
-npm run health
+npm run health:gcp
 ```
 
 ## Troubleshooting Test Builds
@@ -279,7 +279,7 @@ gcloud deploy rollouts describe <ROLLOUT_NAME> \
 ### 1. Always Test Locally First
 
 ```bash
-npm run build && npm run health
+npm run build && npm run health:local
 ```
 
 ### 2. Use Preflight Checks
@@ -325,10 +325,11 @@ Before pushing to GitHub, verify:
 - [ ] Local build succeeds: `npm run build`
 - [ ] Local tests pass: `npm test`
 - [ ] Linting passes: `npm run lint`
+- [ ] Local health check passes: `npm run health:local`
 - [ ] Cloud build succeeds: `npm run build:cloud`
 - [ ] Preflight checks pass: `npm run preflight`
 - [ ] Full deploy succeeds: `npm run deploy:cloud`
-- [ ] Health check passes: `npm run health`
+- [ ] GCP health check passes: `npm run health:gcp`
 - [ ] cloudbuild.yaml syntax is valid
 
 ## Quick Reference
@@ -339,7 +340,8 @@ Before pushing to GitHub, verify:
 | `npm run build:cloud` | Remote build only | Test Dockerfile or build config |
 | `npm run deploy:cloud` | Full build + deploy | Test complete workflow before push |
 | `npm run preflight` | Check permissions | Before any deployment |
-| `npm run health` | Check service health | After deployment |
+| `npm run health:local` | Check local service health | After local Docker build |
+| `npm run health:gcp` | Check GCP service health | After GCP deployment |
 | `npm run logs` | View service logs | Debugging deployed service |
 | `gcloud builds submit` | Manual Cloud Build | Test cloudbuild.yaml changes |
 

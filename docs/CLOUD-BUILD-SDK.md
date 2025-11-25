@@ -349,7 +349,7 @@ echo "Service URL: $SERVICE_URL"
 ### 3. Test Health Endpoint
 
 ```bash
-npm run health
+npm run health:gcp
 ```
 
 **Expected output:**
@@ -491,7 +491,7 @@ View in GCP Console:
 
 ```bash
 # Check service health
-npm run health
+npm run health:gcp
 
 # View recent logs
 npm run logs
@@ -905,7 +905,8 @@ git push origin main                      # Automatic via CI/CD
 npm run deploy:cloud                      # Manual build and deploy
 
 # Monitor
-npm run health                            # Check service health
+npm run health:gcp                        # Check GCP service health
+npm run health:local                      # Check local service health
 npm run logs                              # View recent logs
 npm run logs -- --follow                  # Follow logs in real-time
 gcloud builds list --limit=5              # View build history
@@ -978,9 +979,12 @@ npm run preflight:slack    # Verify Slack configuration only
 #### Health & Monitoring
 
 ```bash
-npm run health             # Check service health (single check)
-npm run health:watch       # Watch health status (continuous)
-npm run health:json        # Output health status as JSON
+npm run health:local       # Check local service health
+npm run health:gcp         # Check GCP service health
+npm run health:watch       # Watch GCP health status (continuous)
+npm run health:watch:local # Watch local health status (continuous)
+npm run health:json        # Output GCP health status as JSON
+npm run health:json:local  # Output local health status as JSON
 npm run status             # Check Cloud Run service status
 npm run logs               # View recent Cloud Run logs
 ```

@@ -330,7 +330,7 @@ node --check app.js
 Check system status for both local and GCP environments with our modular OO architecture:
 
 ```shell
-# Local environment checks (Docker, Node.js, Filesystem, Ports)
+# Local environment checks (Docker, Node.js, Service Configuration, Ports)
 npm run health:local
 
 # GCP environment checks (Cloud Run, Deploy, Build)
@@ -353,7 +353,7 @@ npm run health:json:local      # Local
 - **[GIT]** Version sync between local and deployed code
 - **[DOCKER]** Docker status and container health (local only)
 - **[NODE]** Node.js environment and dependencies (local only)
-- **[FS]** Filesystem checks for required files (local only)
+- **[FS]** Service Configuration checks for required files (local only)
 - **[PORT]** Port availability checks (local only)
 
 **Features:**
@@ -583,7 +583,7 @@ on-call-cat/
 │       │   ├── gcp-check.mjs
 │       │   ├── docker-check.mjs
 │       │   ├── node-check.mjs
-│       │   ├── filesystem-check.mjs
+│       │   ├── configuration-check.mjs
 │       │   └── port-check.mjs
 │       └── renderers/            # 3 flexible renderers
 │           ├── terminal-renderer.mjs

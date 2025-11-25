@@ -6,13 +6,13 @@ Comprehensive guide to the unified health check system for On-Call Cat, supporti
 
 The health check system provides real-time visibility into:
 - **Application health** and configuration (local + GCP)
-- **Local environment** (Docker, Node.js, Filesystem, Ports)
+- **Local environment** (Docker, Node.js, Service Configuration, Ports)
 - **GCP services** (Cloud Run, Cloud Deploy, Cloud Build)
 - **Git version** synchronization
 
 ### Architecture Highlights
 
-- **7 Modular Checkers**: Git, App, GCP, Docker, Node, Filesystem, Port
+- **7 Modular Checkers**: Git, App, GCP, Docker, Node, Service Configuration, Port
 - **3 Flexible Renderers**: Terminal (rich UI), JSON (structured), Watch (animated)
 - **OO Design**: Base classes with extensible checkers and renderers
 - **Target-Aware**: Automatically runs appropriate checks based on environment
@@ -22,7 +22,7 @@ The health check system provides real-time visibility into:
 ### Basic Commands
 
 ```shell
-# Local environment (Docker, Node.js, Filesystem, Ports)
+# Local environment (Docker, Node.js, Service Configuration, Ports)
 npm run health:local
 
 # GCP environment (Cloud Run, Deploy, Build)
@@ -136,7 +136,7 @@ Checks Node.js environment and dependencies.
 - npm version
 - Dependencies status (OK/ERR based on `npm ls`)
 
-#### [FS] Filesystem
+#### [FS] Service Configuration
 Checks for required configuration files.
 
 **Files Checked:**

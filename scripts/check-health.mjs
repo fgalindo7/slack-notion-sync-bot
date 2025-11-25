@@ -15,7 +15,7 @@ import { AppHealthCheck } from '../lib/health-check/checks/app-health-check.mjs'
 import { GcpCheck } from '../lib/health-check/checks/gcp-check.mjs';
 import { DockerCheck } from '../lib/health-check/checks/docker-check.mjs';
 import { NodeCheck } from '../lib/health-check/checks/node-check.mjs';
-import { FilesystemCheck } from '../lib/health-check/checks/filesystem-check.mjs';
+import { ServiceConfigurationCheck } from '../lib/health-check/checks/service-config-check.mjs';
 import { PortCheck } from '../lib/health-check/checks/port-check.mjs';
 
 // Import renderers
@@ -67,9 +67,9 @@ function initializeCheckers(target) {
   // Target-specific checks
   if (target === 'local') {
     checkers.push(new DockerCheck(config));
-    checkers.push(new NodeCheck(config));
-    checkers.push(new FilesystemCheck(config));
     checkers.push(new PortCheck(config));
+    checkers.push(new ServiceConfigurationCheck(config));
+    checkers.push(new NodeCheck(config));
     // In dry-run mode, also include GCP checks for testing
     if (process.env.DRY_RUN === '1') {
       checkers.push(new GcpCheck(config));

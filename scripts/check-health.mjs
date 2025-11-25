@@ -914,6 +914,26 @@ async function main() {
       }
     }, Math.max(120, flags.animInterval));
 
+    // Countdown updater (updates countdown display every second without full re-render)
+    const countdownTimer = setInterval(() => {
+      if (isRefreshing) {
+        return;
+      }
+      secondsUntilRefresh -= 1;
+      if (secondsUntilRefresh < 0) {
+        secondsUntilRefresh = 0;
+      }
+
+      // Update just the countdown line at the bottom using cursor positioning
+      // Save cursor, move to approximate countdown line, update, restore cursor
+      process.stdout.write('\x1b7'); // Save cursor
+      process.stdout.write('\x1b[999;0H'); // Move to very bottom
+      process.stdout.write('\x1b[1A'); // Move up one line
+      process.stdout.write('\x1b[2K'); // Clear line
+      process.stdout.write(`${colors.gray}Refreshing in ${secondsUntilRefresh}s... (Ctrl+C to exit)${colors.reset}`);
+      process.stdout.write('\x1b8'); // Restore cursor
+    }, 1000);
+
     // Periodic full refresh (rebuilds the body and resets header baseline)
     // Fetch data BEFORE clearing to eliminate flicker
     const bodyTimer = setInterval(async () => {
@@ -928,6 +948,7 @@ async function main() {
     // Ensure process keeps running with intervals; handle Ctrl+C to cleanup
     process.on('SIGINT', () => {
       clearInterval(animTimer);
+      clearInterval(countdownTimer);
       clearInterval(bodyTimer);
       process.exit(130);
     });

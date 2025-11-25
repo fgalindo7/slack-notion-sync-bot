@@ -44,9 +44,27 @@ const colors = {
   cyan: '\x1b[36m',
   red: '\x1b[31m',
   gray: '\x1b[90m',
+  orange: '\x1b[38;5;208m', // 256-color orange for staging (strawberry-blonde)
 };
 
 // icons come from centralized library
+
+/**
+ * Get cat color based on deployment target
+ * @returns {string} ANSI color code
+ */
+function getCatColor() {
+  const target = flags.target.toLowerCase();
+  if (target === 'local') {
+    return colors.cyan;
+  } else if (target === 'gcp' || target === 'gcp-staging' || target === 'staging') {
+    return colors.orange; // strawberry-blonde
+  } else if (target === 'gcp-prod' || target === 'prod') {
+    return colors.red;
+  }
+  // Default to cyan if no target specified
+  return colors.cyan;
+}
 
 /**
  * Create terminal hyperlink (OSC 8) if supported
@@ -326,6 +344,7 @@ async function fetchCloudDeployInfo() {
 
 /**
  * Fetch recent Cloud Build history
+ * Only returns builds for the oncall-cat repository
  */
 async function fetchCloudBuildInfo() {
   if (cli?.dryRun) {
@@ -338,17 +357,35 @@ async function fetchCloudBuildInfo() {
     };
   }
   try {
-    const builds = await gcloud(`builds list --limit=5 --format=json`);
+    // Fetch more builds to account for filtering
+    const builds = await gcloud(`builds list --limit=20 --format=json`);
     if (!builds) { return null; }
     const buildData = JSON.parse(builds);
-    return { recentBuilds: buildData.map(build => ({
-      id: build.id.substring(0, 8),
-      status: build.status,
-      createTime: build.createTime,
-      duration: build.timing?.BUILD?.endTime && build.timing?.BUILD?.startTime ? (new Date(build.timing.BUILD.endTime) - new Date(build.timing.BUILD.startTime)) / 1000 : null,
-      commitSha: build.substitutions?.SHORT_SHA || 'unknown',
-      triggerName: build.buildTriggerId ? 'TRIGGER' : 'MANUAL',
-    })), consoleUrl: `https://console.cloud.google.com/cloud-build/builds?project=${CONFIG.projectId}` };
+
+    // Filter builds that belong to the oncall-cat repository
+    // A build belongs to this repo if its images contain 'oncall-cat'
+    const repoBuilds = buildData
+      .filter(build => {
+        // Check if any image in the build contains the repo name
+        const hasRepoImage = build.images?.some(img =>
+          img.includes(`/${CONFIG.serviceName}/`)
+        );
+        return hasRepoImage;
+      })
+      .slice(0, 5) // Take only the 5 most recent after filtering
+      .map(build => ({
+        id: build.id.substring(0, 8),
+        status: build.status,
+        createTime: build.createTime,
+        duration: build.timing?.BUILD?.endTime && build.timing?.BUILD?.startTime ? (new Date(build.timing.BUILD.endTime) - new Date(build.timing.BUILD.startTime)) / 1000 : null,
+        commitSha: build.substitutions?.SHORT_SHA || 'unknown',
+        triggerName: build.buildTriggerId ? 'TRIGGER' : 'MANUAL',
+      }));
+
+    return {
+      recentBuilds: repoBuilds,
+      consoleUrl: `https://console.cloud.google.com/cloud-build/builds?project=${CONFIG.projectId}`
+    };
   } catch { return null; }
 }
 
@@ -706,8 +743,9 @@ async function renderDashboard() {
   // animation loop handles painting to avoid duplicate cats.
   if (!flags.json && !flags.watch) {
     const frame = getCatFrame();
+    const catColor = getCatColor();
     console.log('');
-    frame.forEach(line => console.log(`  ${colors.cyan}${line}${colors.reset}`));
+    frame.forEach(line => console.log(`  ${catColor}${line}${colors.reset}`));
   }
   
   // Fetch all data
@@ -822,12 +860,13 @@ async function main() {
     // Paint only the cat header at the top, leaving body intact
     function paintCatHeader(key) {
       // Move cursor to top-left, print one blank line + 3 cat lines colored
+      const catColor = getCatColor();
       process.stdout.write('\x1b[H');
       console.log('');
       const lines = (catFrames[key] || catFrames.normal);
       for (const line of lines) {
         // Leading two spaces to match dashboard indent
-        process.stdout.write(`  ${colors.cyan}${line}${colors.reset}\n`);
+        process.stdout.write(`  ${catColor}${line}${colors.reset}\n`);
       }
     }
 

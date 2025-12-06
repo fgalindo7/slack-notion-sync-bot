@@ -1005,10 +1005,14 @@ async function checkPendingPages() {
         // Findings populated! Respond to user
         logger.info({ pageId, checkCount: info.checkCount, elapsedMinutes }, 'Findings populated, notifying user');
         
+        const learningMessage = `\n\n_I\'m constantly learning and will get better with time! ' +
+          'You can help me improve by sharing the resolution in this thread or correcting my findings. ' +
+          'Every bit of feedback helps this on-call cat become sharper! ${icons.emojiFindings}_`;
+        
         await app.client.chat.postMessage({
           channel: info.slackChannel,
           thread_ts: info.slackTs,
-          text: `${icons.emojiFindings} *Findings*\n\n${findingsText}`
+          text: `${icons.emojiFindings} *Findings*\n\n${findingsText}${learningMessage}`
         });
 
         // Remove from pending checks

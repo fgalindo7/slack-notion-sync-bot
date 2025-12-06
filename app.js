@@ -62,6 +62,12 @@ const withTimeout = (promise, ms = config.api.timeout, operation = 'Operation') 
 // Initialize metrics tracking
 const metrics = new BotMetrics();
 
+// Tracking system for pages awaiting findings check
+const pendingChecks = new Map(); // pageId -> { slackChannel, slackTs, databaseId, checkCount, createdAt }
+const FINDINGS_CHECK_INTERVAL = 30000; // 30 seconds
+const FINDINGS_MAX_CHECKS = 10; // Check for up to 5 minutes (10 checks * 30s)
+let findingsCheckTimer = null;
+
 const app = new App({
   token: config.slack.botToken,
   signingSecret: config.slack.signingSecret,
@@ -107,6 +113,14 @@ const notionThrottled = {
         notion.pages.update(params),
         API_TIMEOUT,
         'Notion pages.update'
+      );
+    }),
+    retrieve: throttle(async (params) => {
+      logger.debug({ pageId: params.page_id }, 'Notion API: pages.retrieve');
+      return await withTimeout(
+        notion.pages.retrieve(params),
+        API_TIMEOUT,
+        'Notion pages.retrieve'
       );
     })
   },
@@ -523,7 +537,7 @@ app.event('message', async ({ event, client }) => {
     const isUpdate = !!existing;
     
     try {
-      const { url } = await createOrUpdateNotionPage({
+      const { id: pageId, url } = await createOrUpdateNotionPage({
         parsed,
         permalink,
         slackTs: ts,
@@ -548,6 +562,11 @@ app.event('message', async ({ event, client }) => {
           processingTime,
           metricsCreated: metrics.get('messagesCreated')
         }, 'Notion page created');
+        
+        // Schedule findings check for new pages
+        if (pageId) {
+          scheduleColumnCheck(pageId, event.channel, ts, databaseId);
+        }
       }
       
       await replyCreated({ client, channel: event.channel, ts, pageUrl: url, parsed, suffix, databaseId });
@@ -907,6 +926,113 @@ function setProp(props, name, value, schema) {
 }
 
 /**
+ * Schedules a column check for a newly created Notion page
+ * Polls the page for up to 5 minutes to check if findings are populated
+ * @param {string} pageId - Notion page ID to monitor
+ * @param {string} slackChannel - Slack channel ID for response
+ * @param {string} slackTs - Slack message timestamp for threading
+ * @param {string} databaseId - Notion database ID
+ * @returns {void}
+ */
+function scheduleColumnCheck(pageId, slackChannel, slackTs, databaseId) {
+  if (!pageId || !slackChannel || !slackTs || !databaseId) {
+    logger.warn({ pageId, slackChannel, slackTs, databaseId }, 'Missing required params for scheduleColumnCheck');
+    return;
+  }
+
+  pendingChecks.set(pageId, {
+    slackChannel,
+    slackTs,
+    databaseId,
+    checkCount: 0,
+    createdAt: Date.now()
+  });
+
+  logger.info({ pageId, slackChannel, slackTs }, 'Scheduled findings check for page');
+
+  // Start the polling timer if not already running
+  if (!findingsCheckTimer) {
+    findingsCheckTimer = setInterval(checkPendingPages, FINDINGS_CHECK_INTERVAL);
+    logger.info({ intervalMs: FINDINGS_CHECK_INTERVAL }, 'Started findings check polling');
+  }
+}
+
+/**
+ * Checks all pending pages for populated findings column
+ * Posts to Slack thread when findings are found, or removes after timeout
+ * @returns {Promise<void>}
+ */
+async function checkPendingPages() {
+  if (pendingChecks.size === 0) {
+    // Stop timer if no pending checks
+    if (findingsCheckTimer) {
+      clearInterval(findingsCheckTimer);
+      findingsCheckTimer = null;
+      logger.info('Stopped findings check polling (no pending checks)');
+    }
+    return;
+  }
+
+  logger.debug({ pendingCount: pendingChecks.size }, 'Checking pending pages for findings');
+
+  for (const [pageId, info] of pendingChecks.entries()) {
+    try {
+      info.checkCount++;
+      const elapsedMinutes = Math.floor((Date.now() - info.createdAt) / 60000);
+
+      // Fetch the page from Notion
+      const page = await notionThrottled.pages.retrieve({ page_id: pageId });
+      const schema = await getSchema(info.databaseId);
+      const findingsMeta = schema.byName[NOTION_FIELDS.ONCALL_CAT_FINDINGS.toLowerCase()];
+
+      if (!findingsMeta) {
+        logger.warn({ pageId, databaseId: info.databaseId }, 'Findings column not found in schema');
+        pendingChecks.delete(pageId);
+        continue;
+      }
+
+      // Check if findings column has content
+      const findingsProp = page.properties[findingsMeta.name];
+      let hasContent = false;
+      let findingsText = '';
+
+      if (findingsProp?.rich_text && Array.isArray(findingsProp.rich_text)) {
+        findingsText = findingsProp.rich_text.map(block => block.plain_text || '').join('').trim();
+        hasContent = findingsText.length > 0;
+      }
+
+      if (hasContent) {
+        // Findings populated! Respond to user
+        logger.info({ pageId, checkCount: info.checkCount, elapsedMinutes }, 'Findings populated, notifying user');
+        
+        await app.client.chat.postMessage({
+          channel: info.slackChannel,
+          thread_ts: info.slackTs,
+          text: `${icons.emojiFindings} *Findings*\n\n${findingsText}`
+        });
+
+        // Remove from pending checks
+        pendingChecks.delete(pageId);
+        metrics.increment('findingsDelivered');
+      } else if (info.checkCount >= FINDINGS_MAX_CHECKS) {
+        // Timeout reached, stop checking
+        logger.info({ pageId, checkCount: info.checkCount, elapsedMinutes }, 'Findings check timeout reached');
+        pendingChecks.delete(pageId);
+        metrics.increment('findingsTimeout');
+      } else {
+        logger.debug({ pageId, checkCount: info.checkCount, elapsedMinutes }, 'Findings not yet populated, will retry');
+      }
+    } catch (err) {
+      logger.error({ error: err.message, pageId }, 'Error checking page for findings');
+      // Remove from tracking on persistent errors
+      if (info.checkCount >= 3) {
+        pendingChecks.delete(pageId);
+      }
+    }
+  }
+}
+
+/**
  * Gracefully shuts down the application
  * Stops the Bolt app and cleans up resources
  * @param {string} signal - The signal that triggered shutdown (SIGTERM, SIGINT, etc.)
@@ -918,6 +1044,13 @@ async function gracefulShutdown(signal) {
   try {
     // Mark as unhealthy
     isHealthy = false;
+    
+    // Stop findings check timer
+    if (findingsCheckTimer) {
+      clearInterval(findingsCheckTimer);
+      findingsCheckTimer = null;
+      logger.info('Findings check timer cleared');
+    }
     
     // Stop health check server
     healthServer.close(() => {

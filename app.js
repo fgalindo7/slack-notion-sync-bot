@@ -1005,9 +1005,7 @@ async function checkPendingPages() {
         // Findings populated! Respond to user
         logger.info({ pageId, checkCount: info.checkCount, elapsedMinutes }, 'Findings populated, notifying user');
         
-        const learningMessage = `\n\n_I\'m constantly learning and will get better with time! ' +
-          'You can help me improve by sharing the resolution in this thread or correcting my findings. ' +
-          'Every bit of feedback helps this on-call cat become sharper! ${icons.emojiFindings}_`;
+        const learningMessage = `\n\n**I’m always sharpening my claws and getting smarter. Share the resolution here and feel free to correct me; every hint helps me become a flawless hunter!** ${icons.emojiFindings}`;
         
         await app.client.chat.postMessage({
           channel: info.slackChannel,

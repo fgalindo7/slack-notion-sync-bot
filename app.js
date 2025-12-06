@@ -997,7 +997,32 @@ async function checkPendingPages() {
       let findingsText = '';
 
       if (findingsProp?.rich_text && Array.isArray(findingsProp.rich_text)) {
-        findingsText = findingsProp.rich_text.map(block => block.plain_text || '').join('').trim();
+        // Convert Notion rich text to Slack markdown
+        findingsText = findingsProp.rich_text.map(block => {
+          let text = block.plain_text || '';
+          const annotations = block.annotations || {};
+          
+          // Apply Slack formatting based on Notion annotations
+          if (annotations.bold) {
+            text = `*${text}*`;
+          }
+          if (annotations.italic) {
+            text = `_${text}_`;
+          }
+          if (annotations.strikethrough) {
+            text = `~${text}~`;
+          }
+          if (annotations.code) {
+            text = `\`${text}\``;
+          }
+          
+          // Handle links
+          if (block.href) {
+            text = `<${block.href}|${text}>`;
+          }
+          
+          return text;
+        }).join('').trim();
         hasContent = findingsText.length > 0;
       }
 
@@ -1005,12 +1030,14 @@ async function checkPendingPages() {
         // Findings populated! Respond to user
         logger.info({ pageId, checkCount: info.checkCount, elapsedMinutes }, 'Findings populated, notifying user');
         
-        const learningMessage = `\n\n**I’m always sharpening my claws and getting smarter. Share the resolution here and feel free to correct me; every hint helps me become a flawless hunter!** ${icons.emojiFindings}`;
+        const learningMessage = `\n\n*I’m always sharpening my claws and getting smarter. Share the resolution here and feel free to correct me; every hint helps me become a flawless hunter!* ${icons.emojiFindings}`;
         
         await app.client.chat.postMessage({
           channel: info.slackChannel,
           thread_ts: info.slackTs,
-          text: `${icons.emojiFindings} *Findings*\n\n${findingsText}${learningMessage}`
+          text: `${icons.emojiFindings} *Findings*\n\n${findingsText}${learningMessage}`,
+          unfurl_links: false,
+          unfurl_media: false
         });
 
         // Remove from pending checks
